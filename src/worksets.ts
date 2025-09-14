@@ -325,7 +325,7 @@ export namespace Worksets {
       public readonly group: Types.Group,
       iconPath?: vscode.ThemeIcon | vscode.Uri | { light: vscode.Uri; dark: vscode.Uri }
     ) {
-      super(group.name, vscode.TreeItemCollapsibleState.Expanded)
+      super(group.name, vscode.TreeItemCollapsibleState.Collapsed)
       this.contextValue = "group"
       const color = group.colorName ? new vscode.ThemeColor(group.colorName) : undefined
       if (group.iconId === "__none__") {
@@ -400,6 +400,11 @@ export namespace Worksets {
         dark: vscode.Uri.joinPath(this.ctx.extensionUri, "media", "folder.svg"),
       }
       void this.init()
+    }
+
+    private _view: vscode.TreeView<TreeItem> | undefined
+    attachView(view: vscode.TreeView<TreeItem>) {
+      this._view = view
     }
 
     private async init(): Promise<void> {
@@ -766,6 +771,8 @@ export namespace Worksets {
       }
       this.state = s
       this._emitter.fire()
+      // Reveal and select the newly created group, expanding parents if needed
+      setTimeout(() => { void this.revealGroupById(newG.id) }, 0)
     }
 
     async addSubGroup(target: TreeGroupItem) {
@@ -789,6 +796,25 @@ export namespace Worksets {
     }
 
     async remove(item: TreeItem) {
+      const cfg = vscode.workspace.getConfiguration("workscene")
+      const confirm = cfg.get<boolean>("confirmBeforeRemove", true)
+      if (confirm) {
+        const isGroup = item instanceof TreeGroupItem
+        const name = isGroup
+          ? (item as TreeGroupItem).group.name
+          : (item as TreeFileItem).entry.name || (item as TreeFileItem).entry.rel
+        const message = isGroup
+          ? `"${name}" grubu ve alt öğeleri kaldırılacak. Devam edilsin mi?`
+          : `"${name}" gruptan kaldırılacak. Devam edilsin mi?`
+        const picked = await vscode.window.showWarningMessage(
+          message,
+          { modal: true },
+          "Kaldır",
+          "İptal"
+        )
+        if (picked !== "Kaldır") return
+      }
+
       const s = this.state
       if (item instanceof TreeGroupItem) {
         this.removeGroupById(s.groups, item.group.id)
@@ -1031,9 +1057,16 @@ export namespace Worksets {
         { label: "Mavi", value: "terminal.ansiCyan" },
         { label: "Yeşil", value: "terminal.ansiGreen" },
       ]
+      const extra = vscode.workspace
+        .getConfiguration("workscene")
+        .get<string[]>("extraColors", [])
+        .filter((s) => typeof s === "string" && s.trim().length > 0)
+        .map((s) => s.trim())
       const items = [
         { label: "Default", value: "__default__" },
         ...colors.map((c) => ({ label: c.label, value: c.value })),
+        ...extra.map((v) => ({ label: v, value: v })),
+        { label: "Custom Hex…", value: "__custom_hex__" },
       ]
       const picked = await vscode.window.showQuickPick(items, {
         placeHolder: "Select a color for this group",
@@ -1042,10 +1075,80 @@ export namespace Worksets {
       const s = this.state
       const g = this.findGroupById(s.groups, item.group.id)?.group
       if (!g) return
-      if (picked.value === "__default__") delete g.colorName
-      else g.colorName = picked.value
+      if (picked.value === "__default__") {
+        delete g.colorName
+      } else if (picked.value === "__custom_hex__") {
+        const hexInput = await vscode.window.showInputBox({
+          prompt: "Hex color (e.g. #FF8800)",
+          placeHolder: "#RRGGBB",
+          validateInput: (v) => (/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(v.trim()) ? undefined : "Geçerli bir hex renk girin")
+        })
+        if (!hexInput) return
+        const hex = this.normalizeHex(hexInput)
+        const token = await this.ensureThemeTokenForHex(hex)
+        if (token) g.colorName = token
+      } else if (/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(picked.value)) {
+        const hex = this.normalizeHex(picked.value)
+        const token = await this.ensureThemeTokenForHex(hex)
+        if (token) g.colorName = token
+      } else {
+        g.colorName = picked.value
+      }
       this.state = s
       this._emitter.fire(item)
+    }
+
+    /** Convert #RGB to #RRGGBB and uppercase */
+    private normalizeHex(v: string): string {
+      const t = v.trim()
+      if (/^#[0-9a-fA-F]{3}$/.test(t)) {
+        const r = t[1], g = t[2], b = t[3]
+        return `#${r}${r}${g}${g}${b}${b}`.toUpperCase()
+      }
+      return t.toUpperCase()
+    }
+
+    /** Map hex to a custom theming color token via workbench.colorCustomizations */
+    private async ensureThemeTokenForHex(hex: string): Promise<string | undefined> {
+      const tokenPool = Array.from({ length: 10 }, (_, i) => `workscene.color.custom${i + 1}`)
+      const config = vscode.workspace.getConfiguration()
+      const current = config.get<any>("workbench.colorCustomizations") || {}
+      for (const t of tokenPool) {
+        if (typeof current[t] === "string" && String(current[t]).toUpperCase() === hex.toUpperCase()) {
+          return t
+        }
+      }
+      const free = tokenPool.find((t) => !current[t]) ?? tokenPool[tokenPool.length - 1]
+      const next = { ...current, [free]: hex }
+      try {
+        await config.update("workbench.colorCustomizations", next, vscode.ConfigurationTarget.Workspace)
+        return free
+      } catch {
+        vscode.window.showErrorMessage("Hex rengi uygularken ayar güncellenemedi.")
+        return undefined
+      }
+    }
+
+    private async revealGroupById(id: string): Promise<void> {
+      if (!this._view) return
+      const findIn = async (items: TreeItem[]): Promise<TreeGroupItem | undefined> => {
+        for (const it of items) {
+          if (it instanceof TreeGroupItem && it.group.id === id) return it
+          if (it instanceof TreeGroupItem) {
+            const kids = (await this.getChildren(it)) || []
+            const found = await findIn(kids)
+            if (found) return found
+          }
+        }
+        return undefined
+      }
+      const roots = (await this.getChildren()) || []
+      const target = await findIn(roots)
+      if (target) {
+        try {
+          await this._view.reveal(target, { select: true, focus: true, expand: true })
+        } catch {}
+      }
     }
 
     async exportGroupsToFile(): Promise<void> {

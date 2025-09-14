@@ -13,6 +13,18 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "colors": [
+      { "id": "workscene.color.custom1", "description": "Workscene custom color slot 1", "defaults": { "dark": "#FF8A00", "light": "#FF8A00", "highContrast": "#FF8A00" } },
+      { "id": "workscene.color.custom2", "description": "Workscene custom color slot 2", "defaults": { "dark": "#E91E63", "light": "#E91E63", "highContrast": "#E91E63" } },
+      { "id": "workscene.color.custom3", "description": "Workscene custom color slot 3", "defaults": { "dark": "#9C27B0", "light": "#9C27B0", "highContrast": "#9C27B0" } },
+      { "id": "workscene.color.custom4", "description": "Workscene custom color slot 4", "defaults": { "dark": "#3F51B5", "light": "#3F51B5", "highContrast": "#3F51B5" } },
+      { "id": "workscene.color.custom5", "description": "Workscene custom color slot 5", "defaults": { "dark": "#03A9F4", "light": "#03A9F4", "highContrast": "#03A9F4" } },
+      { "id": "workscene.color.custom6", "description": "Workscene custom color slot 6", "defaults": { "dark": "#009688", "light": "#009688", "highContrast": "#009688" } },
+      { "id": "workscene.color.custom7", "description": "Workscene custom color slot 7", "defaults": { "dark": "#4CAF50", "light": "#4CAF50", "highContrast": "#4CAF50" } },
+      { "id": "workscene.color.custom8", "description": "Workscene custom color slot 8", "defaults": { "dark": "#8BC34A", "light": "#8BC34A", "highContrast": "#8BC34A" } },
+      { "id": "workscene.color.custom9", "description": "Workscene custom color slot 9", "defaults": { "dark": "#CDDC39", "light": "#CDDC39", "highContrast": "#CDDC39" } },
+      { "id": "workscene.color.custom10", "description": "Workscene custom color slot 10", "defaults": { "dark": "#FFC107", "light": "#FFC107", "highContrast": "#FFC107" } }
+    ],
     "keybindings": [
       {
         "command": "workscene.renameGroup",
@@ -194,43 +206,48 @@
       "view/item/context": [
         {
           "command": "workscene.addSubGroup",
-          "when": "view == worksceneView && viewItem == group",
+          "when": "view == worksceneView && viewItem == group && workscene.action.add-subgroup",
           "group": "inline@1"
         },
         {
           "command": "workscene.addFiles",
           "when": "view == worksceneView && viewItem == group",
-          "group": "inline@2"
+          "group": "navigation@2"
         },
         {
           "command": "workscene.renameGroup",
           "when": "view == worksceneView && viewItem == group",
-          "group": "inline@3"
+          "group": "navigation@3"
         },
         {
           "command": "workscene.addOpenTabsToGroup",
           "when": "view == worksceneView && viewItem == group",
-          "group": "inline@4"
+          "group": "navigation@4"
         },
         {
           "command": "workscene.sortGroup",
           "when": "view == worksceneView && viewItem == group",
-          "group": "inline@5"
+          "group": "navigation@5"
         },
         {
           "command": "workscene.changeGroupIcon",
           "when": "view == worksceneView && viewItem == group",
-          "group": "inline@6"
+          "group": "navigation@6"
         },
         {
           "command": "workscene.changeGroupColor",
           "when": "view == worksceneView && viewItem == group",
-          "group": "inline@7"
+          "group": "navigation@7"
         },
         {
           "command": "workscene.remove",
-          "when": "view == worksceneView && viewItem == group",
+          "when": "view == worksceneView && viewItem == group && workscene.action.remove",
           "group": "inline@8"
+        },
+        {
+          "command": "workscene.addSubGroup",
+          "when": "view == worksceneView && viewItem == group",
+          "group": "navigation@1"
         },
         {
           "command": "workscene.moveToGroup",
@@ -275,6 +292,23 @@
           "type": "boolean",
           "default": false,
           "description": "When opening all files in a group, close existing editors first and allow undo for 5 seconds."
+        },
+        "workscene.confirmBeforeRemove": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a confirmation dialog before removing a group or removing a file from a group."
+        },
+        "workscene.itemAccessoryActionIds": {
+          "type": "array",
+          "default": ["add-subgroup", "remove"],
+          "items": { "type": "string" },
+          "description": "Which inline buttons are visible for group items (only affects inline, not context menu). Valid ids: add-subgroup, remove."
+        },
+        "workscene.extraColors": {
+          "type": "array",
+          "default": [],
+          "items": { "type": "string" },
+          "description": "Additional themable color IDs to offer in the group color picker (e.g. 'editorWarning.foreground', 'charts.orange')."
         }
       }
     }

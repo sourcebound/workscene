@@ -16,6 +16,7 @@ export function activate(context: vscode.ExtensionContext) {
     showCollapseAll: true,
     canSelectMany: true,
   })
+  ;(provider as any).attachView?.(treeView)
 
   // Ungrouped Tabs view
   const ungroupedProvider = new Worksets.UngroupedProvider(provider)
@@ -167,6 +168,37 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
     )
+  )
+
+  // Inline accessory visibility (only affects inline buttons): add-subgroup, remove
+  const applyActionVisibilityFromConfig = async () => {
+    const cfg = vscode.workspace.getConfiguration("workscene")
+    const ids = (
+      cfg.get<string[]>("itemAccessoryActionIds") ||
+      cfg.get<string[]>("itemAccesoryActionsIds") ||
+      ["add-subgroup", "remove"]
+    )
+      .filter((s) => typeof s === "string")
+      .map((s) => s.trim().toLowerCase())
+
+    const allow = new Set(ids)
+    const set = (key: string, value: boolean) =>
+      vscode.commands.executeCommand("setContext", `workscene.action.${key}`, value)
+
+    const allKeys = ["add-subgroup", "remove"]
+    await Promise.all(allKeys.map((k) => set(k, false)))
+    await Promise.all(Array.from(allow).map((k) => set(k, true)))
+  }
+  void applyActionVisibilityFromConfig()
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (
+        e.affectsConfiguration("workscene.itemAccessoryActionIds") ||
+        e.affectsConfiguration("workscene.itemAccesoryActionsIds")
+      ) {
+        void applyActionVisibilityFromConfig()
+      }
+    })
   )
 
   const ws = vscode.workspace.workspaceFolders?.[0]
