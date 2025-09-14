@@ -1,0 +1,296 @@
+{
+  "name": "workscene",
+  "displayName": "Workscene",
+  "description": "Xcode-style logical groups without touching the filesystem. Drag from Explorer, persist in workscene.config.json.",
+  "version": "0.0.1",
+  "license": "AGPL-3.0-only",
+  "publisher": "sourcebound",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "keybindings": [
+      {
+        "command": "workscene.renameGroup",
+        "key": "enter",
+        "when": "focusedView == worksceneView && workscene.focusedKind == group"
+      },
+      {
+        "command": "workscene.renameGroup",
+        "key": "f2",
+        "when": "focusedView == worksceneView && workscene.focusedKind == group"
+      },
+      {
+        "command": "workscene.remove",
+        "key": "backspace",
+        "when": "view == worksceneView && viewItem == group"
+      },
+      {
+        "command": "workscene.remove",
+        "key": "backspace",
+        "when": "view == worksceneView && viewItem == file"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "worksceneView",
+          "name": "Workscene",
+          "contextualTitle": "Workscene",
+          "visibility": "visible",
+          "icon": "$(folder-library)"
+        },
+        {
+          "id": "worksceneUngroupedView",
+          "name": "Ungrouped Tabs",
+          "contextualTitle": "Ungrouped Tabs",
+          "visibility": "visible",
+          "icon": "$(folder-library)"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "workscene.addToGroupFromExplorer",
+        "title": "Gruba Ekle...",
+        "icon": "$(add)"
+      },
+      {
+        "command": "workscene.addFiles",
+        "title": "Ekle...",
+        "icon": "$(symbol-reference)"
+      },
+      {
+        "command": "workscene.addGroup",
+        "title": "Yeni Grup...",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "workscene.addOpenTabsToGroup",
+        "title": "Sekmeleri Gruba Ekle...",
+        "icon": "$(newline)"
+      },
+      {
+        "command": "workscene.addSubGroup",
+        "title": "Yeni Alt Grup...",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "workscene.renameGroup",
+        "title": "Yeniden Adlandır",
+        "icon": "$(whole-word)"
+      },
+      {
+        "command": "workscene.remove",
+        "title": "Kaldır",
+        "icon": "$(trashcan)"
+      },
+      {
+        "command": "workscene.moveToGroup",
+        "title": "Şu Gruba Taşı..."
+      },
+      {
+        "command": "workscene.editFileMeta",
+        "title": "Dosya Takma Adı/Açıklama Düzenle",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "workscene.refresh",
+        "title": "Yenile",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "workscene.saveNow",
+        "title": "Kaydet"
+      },
+      {
+        "command": "workscene.sortGroup",
+        "title": "Sırala",
+        "icon": "$(sort-precedence)"
+      },
+      {
+        "command": "workscene.filterGroups",
+        "title": "Filtrele",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "workscene.clearFilter",
+        "title": "Filtreyi Temizle",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "workscene.changeGroupIcon",
+        "title": "Simgeyi Değiştir",
+        "icon": "$(package)"
+      },
+      {
+        "command": "workscene.changeGroupColor",
+        "title": "Renk Değiştir",
+        "icon": "$(paintcan)"
+      },
+      {
+        "command": "workscene.export",
+        "title": "Dışa Aktar",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "workscene.import",
+        "title": "İçe Aktar",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "workscene.undoCloseEditors",
+        "title": "Kapatılan Dosyaları Geri Al",
+        "icon": "$(history)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "workscene.addGroup",
+          "when": "view == worksceneView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "workscene.refresh",
+          "when": "view == worksceneView",
+          "group": "navigation@9"
+        },
+        {
+          "command": "workscene.saveNow",
+          "when": "view == worksceneView && workscene.canSave",
+          "group": "secondary"
+        },
+        {
+          "command": "workscene.filterGroups",
+          "when": "view == worksceneView && !workscene.hasFilter",
+          "group": "navigation@2"
+        },
+        {
+          "command": "workscene.clearFilter",
+          "when": "view == worksceneView && workscene.hasFilter",
+          "group": "navigation@2"
+        },
+        {
+          "command": "workscene.export",
+          "when": "view == worksceneView",
+          "group": "secondary@1"
+        },
+        {
+          "command": "workscene.import",
+          "when": "view == worksceneView",
+          "group": "secondary@2"
+        },
+        {
+          "command": "workscene.undoCloseEditors",
+          "when": "view == worksceneView && workscene.canUndoClose",
+          "group": "secondary@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "workscene.addSubGroup",
+          "when": "view == worksceneView && viewItem == group",
+          "group": "inline@1"
+        },
+        {
+          "command": "workscene.addFiles",
+          "when": "view == worksceneView && viewItem == group",
+          "group": "inline@2"
+        },
+        {
+          "command": "workscene.renameGroup",
+          "when": "view == worksceneView && viewItem == group",
+          "group": "inline@3"
+        },
+        {
+          "command": "workscene.addOpenTabsToGroup",
+          "when": "view == worksceneView && viewItem == group",
+          "group": "inline@4"
+        },
+        {
+          "command": "workscene.sortGroup",
+          "when": "view == worksceneView && viewItem == group",
+          "group": "inline@5"
+        },
+        {
+          "command": "workscene.changeGroupIcon",
+          "when": "view == worksceneView && viewItem == group",
+          "group": "inline@6"
+        },
+        {
+          "command": "workscene.changeGroupColor",
+          "when": "view == worksceneView && viewItem == group",
+          "group": "inline@7"
+        },
+        {
+          "command": "workscene.remove",
+          "when": "view == worksceneView && viewItem == group",
+          "group": "inline@8"
+        },
+        {
+          "command": "workscene.moveToGroup",
+          "when": "view == worksceneView && viewItem == file"
+        },
+        {
+          "command": "workscene.editFileMeta",
+          "when": "view == worksceneView && viewItem == file",
+          "group": "inline@1"
+        },
+        {
+          "command": "workscene.remove",
+          "when": "view == worksceneView && viewItem == file"
+        },
+        {
+          "command": "workscene.remove",
+          "when": "view == worksceneView && viewItem == group"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "workscene.addToGroupFromExplorer",
+          "when": "resourceScheme == file",
+          "group": "navigation@99"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "worksceneView",
+        "contents": "Henüz bir grup yok. [Yeni Grup Ekle](command:workscene.addGroup)"
+      },
+      {
+        "view": "worksceneUngroupedView",
+        "contents": "Açık olup hiçbir gruba eklenmemiş sekmeler burada listelenir."
+      }
+    ],
+    "configuration": {
+      "title": "Workscene",
+      "properties": {
+        "workscene.autoCloseOnOpenAll": {
+          "type": "boolean",
+          "default": false,
+          "description": "When opening all files in a group, close existing editors first and allow undo for 5 seconds."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.14",
+    "@types/vscode": "^1.84.0",
+    "tslib": "^2.6.2",
+    "typescript": "^5.6.2"
+  },
+  "dependencies": {
+    "uuid": "^11.1.0"
+  }
+}
