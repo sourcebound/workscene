@@ -3,6 +3,7 @@ import * as path from "path"
 import { TextEncoder, TextDecoder } from "util"
 import { v4 as UUID } from "uuid"
 import { productIcons } from "./vscode-product-icons"
+import { twColorsHex } from "./tw-colors-hex"
 
 export namespace Worksets {
 
@@ -1035,6 +1036,7 @@ export namespace Worksets {
         { label: "No Icon", id: "__none__" },
         ...icons.map((id) => ({ label: `$(${id}) ${id}`, id })),
       ]
+
       const picked = await vscode.window.showQuickPick(items, {
         placeHolder: "Grup Simgesi...",
       })
@@ -1062,10 +1064,12 @@ export namespace Worksets {
         .get<string[]>("extraColors", [])
         .filter((s) => typeof s === "string" && s.trim().length > 0)
         .map((s) => s.trim())
+      const twItems = twColorsHex.map((c) => ({ label: c.name, value: c.hex }))
       const items = [
         { label: "Default", value: "__default__" },
         ...colors.map((c) => ({ label: c.label, value: c.value })),
         ...extra.map((v) => ({ label: v, value: v })),
+        ...twItems,
         { label: "Custom Hex…", value: "__custom_hex__" },
       ]
       const picked = await vscode.window.showQuickPick(items, {

@@ -43,3 +43,4 @@ npm-debug.log*
 .github/instructions/nx.instructions.md
 .cursor/rules/nx-rules.mdc
 workscene.config.json
+semantic-commit-messages.md
