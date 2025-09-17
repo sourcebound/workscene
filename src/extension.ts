@@ -1,7 +1,12 @@
 import * as vscode from "vscode"
 import { TextDecoder } from "util"
-import { Worksets } from "./worksets"
-
+import Worksets from "./worksets"
+import { CONFIG_FILE_BASENAME, VIEW_ID } from "@lib/constants"
+import State from "@type/state"
+import TreeItem from "@model/tree-item"
+import { TreeGroupItem } from "@model/tree-group-item"
+import { TreeFileItem } from "@model/tree-file-item"
+import { ensureStateWithMeta } from "./util/normalize"
 /**
  *
  * Eklentinin giriş noktası. Modüler yapıya ayrılmış sınıf ve yardımcıları
@@ -10,7 +15,7 @@ import { Worksets } from "./worksets"
 export function activate(context: vscode.ExtensionContext) {
   const provider = new Worksets.Provider(context)
 
-  const treeView = vscode.window.createTreeView(Worksets.Defaults.VIEW_ID, {
+  const treeView = vscode.window.createTreeView(VIEW_ID, {
     treeDataProvider: provider,
     dragAndDropController: provider,
     showCollapseAll: true,
@@ -18,21 +23,11 @@ export function activate(context: vscode.ExtensionContext) {
   })
   ;(provider as any).attachView?.(treeView)
 
-  // Ungrouped Tabs view
-  const ungroupedProvider = new Worksets.UngroupedProvider(provider)
-  const ungroupedView = vscode.window.createTreeView("worksceneUngroupedView", {
-    treeDataProvider: ungroupedProvider,
-    showCollapseAll: false,
-  })
-  context.subscriptions.push(
-    ungroupedView,
-    vscode.window.tabGroups.onDidChangeTabs(() => ungroupedProvider.refresh())
-  )
   // Focus key context for item kind (group/file) to support Enter=Rename behavior
   context.subscriptions.push(
     treeView.onDidChangeSelection(async (e) => {
       const sel = e.selection?.[0]
-      const kind = sel instanceof Worksets.TreeGroupItem ? "group" : sel instanceof Worksets.TreeFileItem ? "file" : undefined
+      const kind = sel instanceof TreeGroupItem ? "group" : sel instanceof TreeFileItem ? "file" : undefined
       await vscode.commands.executeCommand("setContext", "workscene.focusedKind", kind)
     })
   )
@@ -57,59 +52,59 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("workscene.addGroup", () => {
       const sel = treeView.selection?.[0]
-      if (sel instanceof Worksets.TreeGroupItem) return provider.addGroup(sel)
+      if (sel instanceof TreeGroupItem) return provider.addGroup(sel)
       return provider.addGroup()
     }),
     vscode.commands.registerCommand(
       "workscene.addSubGroup",
-      (g: Worksets.TreeGroupItem) => provider.addSubGroup(g)
+      (g: TreeGroupItem) => provider.addSubGroup(g)
     ),
     vscode.commands.registerCommand(
       "workscene.openAllInGroup",
-      (g: Worksets.TreeGroupItem) => provider.openAllInGroup(g)
+      (g: TreeGroupItem) => provider.openAllInGroup(g)
     ),
     vscode.commands.registerCommand(
       "workscene.addOpenTabsToGroup",
-      (g?: Worksets.TreeGroupItem) => provider.addOpenTabsToGroup(g)
+      (g?: TreeGroupItem) => provider.addOpenTabsToGroup(g)
     ),
     vscode.commands.registerCommand(
       "workscene.renameGroup",
-      (g?: Worksets.TreeGroupItem) => {
+      (g?: TreeGroupItem) => {
         const target =
           g ??
-          (treeView.selection?.[0] instanceof Worksets.TreeGroupItem
-            ? (treeView.selection?.[0] as Worksets.TreeGroupItem)
+          (treeView.selection?.[0] instanceof TreeGroupItem
+            ? (treeView.selection?.[0] as TreeGroupItem)
             : undefined)
         if (target) return provider.renameGroup(target)
       }
     ),
     vscode.commands.registerCommand(
       "workscene.addFiles",
-      (g?: Worksets.TreeGroupItem) => provider.addFiles(g)
+      (g?: TreeGroupItem) => provider.addFiles(g)
     ),
     vscode.commands.registerCommand(
       "workscene.remove",
-      (it?: Worksets.TreeItem) => {
+      (it?: TreeItem) => {
         const selection = treeView.selection ?? []
-        const fallback = selection.length ? (selection[0] as Worksets.TreeItem) : undefined
+        const fallback = selection.length ? (selection[0] as TreeItem) : undefined
         return provider.remove(it ?? fallback)
       }
     ),
     vscode.commands.registerCommand(
       "workscene.moveToGroup",
-      (it?: Worksets.TreeFileItem) => {
+      (it?: TreeFileItem) => {
         const selection = treeView.selection ?? []
-        const fallback = selection.find((sel): sel is Worksets.TreeFileItem => sel instanceof Worksets.TreeFileItem)
+        const fallback = selection.find((sel): sel is TreeFileItem => sel instanceof TreeFileItem)
         return provider.moveToGroup(it ?? fallback)
       }
     ),
     vscode.commands.registerCommand(
       "workscene.editFileMeta",
-      (it: Worksets.TreeFileItem) => provider.editFileAliasDescription(it)
+      (it: TreeFileItem) => provider.editFileAliasDescription(it)
     ),
     vscode.commands.registerCommand(
       "workscene.sortGroup",
-      (g: Worksets.TreeGroupItem) => provider.sortGroup(g)
+      (g: TreeGroupItem) => provider.sortGroup(g)
     ),
     vscode.commands.registerCommand(
       "workscene.filterGroups",
@@ -121,18 +116,27 @@ export function activate(context: vscode.ExtensionContext) {
     ),
     vscode.commands.registerCommand(
       "workscene.changeGroupIcon",
-      (g?: Worksets.TreeGroupItem) => {
+      (g?: TreeGroupItem) => {
         const selection = treeView.selection ?? []
-        const fallback = selection.find((sel): sel is Worksets.TreeGroupItem => sel instanceof Worksets.TreeGroupItem)
+        const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
         return provider.changeGroupIcon(g ?? fallback)
       }
     ),
     vscode.commands.registerCommand(
       "workscene.changeGroupColor",
-      (g?: Worksets.TreeGroupItem) => {
+      (g?: TreeGroupItem) => {
         const selection = treeView.selection ?? []
-        const fallback = selection.find((sel): sel is Worksets.TreeGroupItem => sel instanceof Worksets.TreeGroupItem)
+        const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
         return provider.changeGroupColor(g ?? fallback)
+      }
+    ),
+    vscode.commands.registerCommand(
+      "workscene.editGroupTags",
+      (g?: TreeGroupItem) => {
+        const selection = treeView.selection ?? []
+        const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
+        const target = g ?? fallback
+        if (target) return provider.editGroupTags(target)
       }
     ),
     vscode.commands.registerCommand(
@@ -178,6 +182,14 @@ export function activate(context: vscode.ExtensionContext) {
           first = false
         }
       }
+    ),
+    vscode.commands.registerCommand(
+      "workscene.applyTagFilter",
+      (tag: string) => provider.applyTagFilter(tag)
+    ),
+    vscode.commands.registerCommand(
+      "workscene.clearTagFilter",
+      () => provider.clearTagFilter()
     )
   )
 
@@ -215,13 +227,13 @@ export function activate(context: vscode.ExtensionContext) {
   const ws = vscode.workspace.workspaceFolders?.[0]
   if (ws) {
     const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(ws, Worksets.Defaults.CONFIG_FILE_BASENAME)
+      new vscode.RelativePattern(ws, CONFIG_FILE_BASENAME)
     )
     let reloadTimer: ReturnType<typeof setTimeout> | undefined
     const reload = async () => {
       const u = vscode.Uri.joinPath(
         ws.uri,
-        Worksets.Defaults.CONFIG_FILE_BASENAME
+        CONFIG_FILE_BASENAME,
       )
       try {
         if ((provider as any)._isWriting) {
@@ -229,8 +241,8 @@ export function activate(context: vscode.ExtensionContext) {
         }
         const content = await vscode.workspace.fs.readFile(u)
         const text = new TextDecoder("utf-8").decode(content)
-        const parsed = JSON.parse(text) as Partial<Worksets.Types.State>
-        ;(provider as any)._state = Worksets.Utility.ensureStateWithMeta(parsed)
+        const parsed = JSON.parse(text) as Partial<State>
+        ;(provider as any)._state = ensureStateWithMeta(parsed)
         provider.refresh()
         ;(provider as any).syncSavedSignatureWithState?.()
       } catch {
@@ -246,7 +258,7 @@ export function activate(context: vscode.ExtensionContext) {
       watcher.onDidChange(scheduleReload),
       watcher.onDidCreate(scheduleReload),
       watcher.onDidDelete(async () => {
-        ;(provider as any)._state = Worksets.Utility.ensureStateWithMeta({
+        ;(provider as any)._state = ensureStateWithMeta({
           groups: [],
         } as any)
         provider.refresh()

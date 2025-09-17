@@ -9,7 +9,15 @@
     "sourceMap": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["vscode", "node"]
+    "types": ["vscode", "node"],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@lib/*": ["./src/lib/*"],
+      "@type/*": ["./src/type/*"],
+      "@util/*": ["./src/util/*"],
+      "@model/*": ["./src/model/*"],
+    }
   },
+
   "include": ["src/**/*"]
 }

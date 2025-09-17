@@ -1,370 +1,37 @@
-import * as vscode from "vscode"
 import * as path from "path"
-import { TextEncoder, TextDecoder } from "util"
+import * as vscode from "vscode"
 import { v4 as UUID } from "uuid"
-import { productIcons } from "./vscode-product-icons"
-import { twColorsHex } from "./tw-colors-hex"
+import { TextDecoder, TextEncoder } from "util"
 
-export namespace Worksets {
 
-  export namespace Types {
-    /**
-     * @description
-     * Eklentinin kalıcı veri modeli. Gruplar ve dosyaların nasıl temsil edildiğini tanımlar.
-     * @param Meta Kök yol ve sürüm/oluşturulma-zamanı gibi meta bilgiler.
-     * @param Group Ağaç yapısında bir grup düğümü.
-     * @param State Tüm görünümün kök durumu.
-     *
-     * @example
-     * ```ts
-     * const meta: Meta = {
-     *    basePath: 'path/to/project',
-     *    createdAt: '2025-01-01',
-     *    updatedAt: '2025-01-01',
-     *    version: 1
-     * };
-     * ```
-     */
-    export interface Meta {
-      basePath: string
-      createdAt: string
-      updatedAt: string
-      version: number
-    }
+import State from "@type/state"
+import Group from "@type/group"
+import TreeItem from "@model/tree-item"
+import FileEntry from "@type/file-entry"
+import FolderHandlingMode from "@type/folder-handling"
+import { CONFIG_FILE_BASENAME, VIEW_ID } from "@lib/constants"
+import {
+  collectFilesRecursively,
+  collectFilesFirstLevel,
+  labelForTopFolder,
+  toPosix,
+  toRelativeFromFsPath,
+  fromRelativeToUri,
+} from "@util/collect-files"
 
-    export interface FileEntry {
-      rel: string
-      name?: string
-      description?: string
-      kind?: "file" | "folder"
-    }
+import { productIcons } from "@lib/icon"
+import { twColorsHex } from "@lib/color"
+import { TreeTagClearItem } from "@model/tree-tag-clear-item"
+import { TreeTagItem } from "@model/tree-tag-item"
+import { TreeGroupItem } from "@model/tree-group-item"
+import { TreeFileItem } from "@model/tree-file-item"
+import { TreeTagGroupItem } from "@model/tree-tag-group-item"
+import { getDefaultMeta } from "@util/meta"
+import { getGroupChildrenItems } from "@util/helper"
+import { ensureStateWithMeta, normalizeTags } from "./util/normalize"
 
-    
-
-    export interface Group {
-      id: string
-      name: string
-      files: FileEntry[]
-      children?: Group[]
-      iconId?: string
-      colorName?: string
-    }
-
-    export interface State {
-      meta: Meta
-      groups: Group[]
-    }
-  }
-
-  type FolderHandlingMode = "folders" | "first" | "recursive"
-
-  export namespace Utility {
-    /**
-     * state.ts
-     *
-     * Kalıcı durumun (JSON) normalize edilmesi, meta bilgisinin doldurulması ve
-     * sürüm/kök yol bilgilerinin güncel tutulmasından sorumludur.
-     */
-
-    /** Aktif workspace kökünden meta üretir. */
-    export function getDefaultMeta(): Types.Meta {
-      const ws = vscode.workspace.workspaceFolders?.[0]
-      const basePath = ws ? ws.uri.fsPath : ""
-      const now = new Date().toISOString()
-      return { basePath, createdAt: now, updatedAt: now, version: 1 }
-    }
-
-    /** Parçalı gelen state'i meta ve giriş normalize edilerek tamamlar. */
-    export function ensureStateWithMeta(
-      input: Partial<Types.State> | undefined
-    ): Types.State {
-      const defaults = getDefaultMeta()
-      const meta = (input as any)?.meta ?? {}
-      const groups = (input as any)?.groups ?? []
-      const out: Types.State = {
-        meta: {
-          basePath: meta.basePath ?? defaults.basePath,
-          createdAt: meta.createdAt ?? defaults.createdAt,
-          updatedAt: meta.updatedAt ?? defaults.updatedAt,
-          version: typeof meta.version === "number" ? meta.version : 1,
-        },
-        groups,
-      }
-      return normalizeStateEntries(out)
-    }
-
-    /** Giriş değerini (URI/absolut/göreli) normalize eder ve göreli hale getirir. */
-    export function normalizeEntry(input: string, base: string): string {
-      try {
-        if (!input) return input
-        if (input.startsWith("file:")) {
-          const fsPath = vscode.Uri.parse(input).fsPath
-          return toRelativeFromFsPath(fsPath, base)
-        }
-        if (path.isAbsolute(input)) {
-          return toRelativeFromFsPath(input, base)
-        }
-        return toPosix(input)
-      } catch {
-        return input
-      }
-    }
-
-    /** FileEntry'i normalize eder (string ise rel'e sarar). */
-    export function normalizeFileEntry(
-      input: string | Types.FileEntry,
-      base: string
-    ): Types.FileEntry {
-      if (typeof input === "string") {
-        return { rel: normalizeEntry(input, base), kind: "file" }
-      }
-      return {
-        rel: normalizeEntry(input.rel, base),
-        name: input.name,
-        description: input.description,
-        kind: input.kind ?? "file",
-      }
-    }
-
-    /** Grup içindeki tüm yolları normalize eder (özyinelemeli). */
-    export function normalizeGroup(g: Types.Group, base: string): Types.Group {
-      return {
-        id: g.id,
-        name: g.name,
-        files: (g.files as any[] ?? []).map((f) => normalizeFileEntry(f as any, base)),
-        children: (g.children ?? []).map((c) => normalizeGroup(c, base)),
-        iconId: g.iconId,
-        colorName: g.colorName,
-      }
-    }
-
-    /** Tüm state'i normalize eder. */
-    export function normalizeStateEntries(state: Types.State): Types.State {
-      const base = state.meta.basePath
-      const next: Types.State = {
-        meta: state.meta,
-        groups: state.groups.map((g) => normalizeGroup(g, base)),
-      }
-      return next
-    }
-
-    /**
-     * paths.ts
-     *
-     * Yol/URI dönüşümlerini tek bir yerde toplar. Amaç cross-platform tutarlılık
-     * (Windows/Linux/Mac) ve konfig dosyasında göreli yolları korumaktır.
-     */
-
-    /** Yerel dosya yolunu POSIX formatına çevirir ("\\" → "/"). */
-    export function toPosix(p: string): string {
-      return p.split(path.sep).join(path.posix.sep)
-    }
-
-    /**
-     * Absolut dosya sistem yolunu, verilen köke göre göreli hale getirir.
-     * Köke sahip değilsek POSIX normalize edilmiş absolut döner.
-     */
-    export function toRelativeFromFsPath(
-      absFsPath: string,
-      base: string
-    ): string {
-      if (!absFsPath) return ""
-      if (!base) return toPosix(absFsPath)
-      const rel = path.relative(base, absFsPath)
-      return toPosix(rel)
-    }
-
-    /**
-     * Göreli yol + kökten VS Code `Uri` üretir. Kök yoksa girdi mutlak kabul edilir.
-     */
-    export function fromRelativeToUri(rel: string, base: string): vscode.Uri {
-      const abs = base ? path.join(base, rel) : rel
-      return vscode.Uri.file(abs)
-    }
-
-    /**
-     * Verilen mutlak dosya yolundan workspace'e göre en üst klasör etiketini döndürür.
-     */
-    export function labelForTopFolder(
-      absPath: string,
-      workspaceFolders: readonly vscode.WorkspaceFolder[] | undefined =
-        vscode.workspace.workspaceFolders
-    ): string {
-      let relative = absPath
-      if (workspaceFolders?.length) {
-        const match = workspaceFolders.find((f) =>
-          toPosix(absPath).toLowerCase().startsWith(toPosix(f.uri.fsPath).toLowerCase())
-        )
-        if (match) relative = path.relative(match.uri.fsPath, absPath)
-      }
-      const normalized = toPosix(relative)
-      const segs = normalized.split("/")
-      return segs.length > 1 ? segs[0] : "Root"
-    }
-
-    // --- File collection helpers (for adding folders) ---
-    export async function collectFilesRecursively(
-      uri: vscode.Uri,
-      fs: Pick<vscode.FileSystem, "readDirectory"> = vscode.workspace.fs
-    ): Promise<vscode.Uri[]> {
-      const collected: vscode.Uri[] = []
-      const entries = await fs.readDirectory(uri)
-      for (const [name, type] of entries) {
-        const entryUri = vscode.Uri.joinPath(uri, name)
-        if (type === vscode.FileType.File) {
-          collected.push(entryUri)
-        } else if (type === vscode.FileType.Directory) {
-          const sub = await collectFilesRecursively(entryUri, fs)
-          collected.push(...sub)
-        }
-      }
-      return collected
-    }
-
-    export async function collectFilesFirstLevel(
-      uri: vscode.Uri,
-      fs: Pick<vscode.FileSystem, "readDirectory"> = vscode.workspace.fs
-    ): Promise<vscode.Uri[]> {
-      const collected: vscode.Uri[] = []
-      const entries = await fs.readDirectory(uri)
-      for (const [name, type] of entries) {
-        if (type === vscode.FileType.File) {
-          collected.push(vscode.Uri.joinPath(uri, name))
-        }
-      }
-      return collected
-    }
-
-    export async function gatherFileUris(
-      uris: vscode.Uri[],
-      fs: Pick<vscode.FileSystem, "stat" | "readDirectory"> = vscode.workspace.fs
-    ): Promise<vscode.Uri[]> {
-      const out: vscode.Uri[] = []
-      let folderMode: "first" | "recursive" | undefined
-      for (const u of uris) {
-        try {
-          const stat = await fs.stat(u)
-          if (stat.type === vscode.FileType.File) {
-            out.push(u)
-          } else if (stat.type === vscode.FileType.Directory) {
-            const hasSub = (await fs.readDirectory(u)).some(([, t]) => t === vscode.FileType.Directory)
-            if (folderMode === undefined && hasSub) {
-              const picked = await vscode.window.showQuickPick(
-                [
-                  { label: "Add first-level files only", value: "first" },
-                  { label: "Add all files recursively", value: "recursive" },
-                ],
-                { placeHolder: "Select how to add files from folder(s)" }
-              )
-              if (!picked) continue
-              folderMode = picked.value as any
-            }
-            const mode = folderMode ?? "first"
-            const files = mode === "recursive"
-              ? await collectFilesRecursively(u, fs)
-              : await collectFilesFirstLevel(u, fs)
-            out.push(...files)
-          }
-        } catch {
-          // yut ve devam et
-        }
-      }
-      return out
-    }
-
-    /** Yardımcı: grup ve dosya çocuklarını üretir. */
-    export function getGroupChildrenItems(
-      group: Types.Group,
-      basePath: string,
-      groupIconPath?: { light: vscode.Uri; dark: vscode.Uri }
-    ): TreeItem[] {
-      const items: TreeItem[] = []
-      for (const child of group.children ?? []) {
-        items.push(new TreeGroupItem(child, groupIconPath))
-      }
-      for (const fe of group.files) {
-        items.push(
-          new TreeFileItem(
-            fromRelativeToUri(fe.rel, basePath),
-            group.id,
-            fe
-          )
-        )
-      }
-      return items
-    }
-  }
-
-  export namespace Defaults {
-    /**
-     * constants.ts
-     *
-     * Eklentide birden fazla yerde kullanılan sabitleri tek bir yerde toplar.
-     * Bu sayede isimler tek kaynaktan yönetilir ve anlamları netleşir.
-     */
-
-    /** Global Memento anahtarı (ileride ihtiyaç halinde) */
-    export const STATE_KEY = "workscene.state"
-
-    /** Workspace kökünde saklanan konfigürasyon dosyasının adı */
-    export const CONFIG_FILE_BASENAME = "workscene.config.json"
-
-    /** Görünüm kimliği (package.json → contributes.views.explorer[].id ile eşleşmeli) */
-    export const VIEW_ID = "worksceneView"
-  }
-
-  /**
-   * Görünümde gösterilen ağaç düğümlerini tanımlar. `GroupItem` bir grup, `FileItem`
-   * bir dosyayı temsil eder. Her ikisi de VS Code `TreeItem`ından türetilir.
-   */
-  export abstract class TreeItem extends vscode.TreeItem {
-    abstract kind: "group" | "file"
-    groupId?: string
-  }
-
-  export class TreeGroupItem extends TreeItem {
-    kind: "group" = "group"
-    constructor(
-      public readonly group: Types.Group,
-      iconPath?: vscode.ThemeIcon | vscode.Uri | { light: vscode.Uri; dark: vscode.Uri }
-    ) {
-      super(group.name, vscode.TreeItemCollapsibleState.Collapsed)
-      this.contextValue = "group"
-      const color = group.colorName ? new vscode.ThemeColor(group.colorName) : undefined
-      if (group.iconId === "__none__") {
-        this.iconPath = undefined
-      } else {
-        const iconId = group.iconId || "star"
-        this.iconPath = new vscode.ThemeIcon(iconId, color)
-      }
-    }
-  }
-
-  export class TreeFileItem extends TreeItem {
-    kind: "file" = "file"
-    constructor(
-      public readonly uri: vscode.Uri,
-      groupId: string,
-      public readonly entry: Types.FileEntry
-    ) {
-      super(entry.name ?? entry.rel, vscode.TreeItemCollapsibleState.None)
-      this.contextValue = "file"
-      this.resourceUri = uri
-      this.groupId = groupId
-      this.description = entry.description
-      if (entry.kind === "folder") {
-        this.iconPath = new vscode.ThemeIcon("folder")
-        this.command = undefined
-      } else {
-        this.command = {
-          command: "vscode.open",
-          title: "Open File",
-          arguments: [uri],
-        }
-      }
-    }
-  }
-
+namespace Worksets {
+  
   export class Provider
     implements
       vscode.TreeDataProvider<TreeItem>,
@@ -374,30 +41,27 @@ export namespace Worksets {
       "application/vnd.code.tree.worksceneView",
       "text/uri-list",
     ]
+
     readonly dragMimeTypes = ["application/vnd.code.tree.worksceneView"]
 
     private _emitter = new vscode.EventEmitter<TreeItem | undefined | void>()
     readonly onDidChangeTreeData = this._emitter.event
 
-    private _state: Types.State = Utility.ensureStateWithMeta({ groups: [] } as any)
+    private _state: State = ensureStateWithMeta({ groups: [] } as any)
     private _loaded = false
     private _saveTimer: ReturnType<typeof setTimeout> | undefined
     private _contextTimer: ReturnType<typeof setTimeout> | undefined
     private _isWriting = false
     private _lastSavedSignature: string = ""
     private _groupFilter: string | undefined
+    private _tagFilter: string | undefined
     private _recentlyClosed: string[] | null = null
     private _undoCloseTimeout: ReturnType<typeof setTimeout> | undefined
-    private readonly groupIconPath: { light: vscode.Uri; dark: vscode.Uri }
     private readonly out: vscode.OutputChannel
     private static encoder = new TextEncoder()
 
     constructor(private readonly ctx: vscode.ExtensionContext) {
       this.out = vscode.window.createOutputChannel("Workscene")
-      this.groupIconPath = {
-        light: vscode.Uri.joinPath(this.ctx.extensionUri, "media", "folder.svg"),
-        dark: vscode.Uri.joinPath(this.ctx.extensionUri, "media", "folder.svg"),
-      }
       void this.init()
     }
 
@@ -422,7 +86,9 @@ export namespace Worksets {
 
     private getGroupTargets(primary?: TreeGroupItem): TreeGroupItem[] {
       const selected = this.getSelectedItems(primary)
-      const groups = selected.filter((it): it is TreeGroupItem => it instanceof TreeGroupItem)
+      const groups = selected.filter(
+        (it): it is TreeGroupItem => it instanceof TreeGroupItem
+      )
       if (groups.length === 0 && primary instanceof TreeGroupItem) {
         return [primary]
       }
@@ -431,7 +97,9 @@ export namespace Worksets {
 
     private getFileTargets(primary?: TreeFileItem): TreeFileItem[] {
       const selected = this.getSelectedItems(primary)
-      const files = selected.filter((it): it is TreeFileItem => it instanceof TreeFileItem)
+      const files = selected.filter(
+        (it): it is TreeFileItem => it instanceof TreeFileItem
+      )
       if (files.length === 0 && primary instanceof TreeFileItem) {
         return [primary]
       }
@@ -444,26 +112,31 @@ export namespace Worksets {
         try {
           const content = await vscode.workspace.fs.readFile(u)
           const text = new TextDecoder("utf-8").decode(content)
-          const parsed = JSON.parse(text) as Partial<Types.State>
-          this._state = Utility.ensureStateWithMeta(parsed)
+          const parsed = JSON.parse(text) as Partial<State>
+          this._state = ensureStateWithMeta(parsed)
         } catch {
-          this._state = Utility.ensureStateWithMeta({ groups: [] } as any)
+          this._state = ensureStateWithMeta({ groups: [] } as any)
         }
       }
       this._lastSavedSignature = this.computeSignature(this._state)
-      void vscode.commands.executeCommand("setContext", "workscene.canSave", false)
+      void vscode.commands.executeCommand(
+        "setContext",
+        "workscene.canSave",
+        false
+      )
       this._loaded = true
       this.refresh()
+      void this.updateFilterContext()
     }
 
-    private get state(): Types.State {
+    private get state(): State {
       return this._state
     }
-    private set state(v: Types.State) {
-      const basePath = Utility.getDefaultMeta().basePath
+    private set state(v: State) {
+      const basePath = getDefaultMeta().basePath
       const now = new Date().toISOString()
       // v'nin zaten normalize olduğunu varsayıp meta'yı güncelle
-      const next: Types.State = {
+      const next: State = {
         meta: {
           basePath,
           createdAt: this._state.meta?.createdAt || now,
@@ -483,7 +156,7 @@ export namespace Worksets {
     private get configUri(): vscode.Uri | undefined {
       const ws = vscode.workspace.workspaceFolders?.[0]
       if (!ws) return undefined
-      return vscode.Uri.joinPath(ws.uri, Defaults.CONFIG_FILE_BASENAME)
+      return vscode.Uri.joinPath(ws.uri, CONFIG_FILE_BASENAME)
     }
 
     private scheduleSave(): void {
@@ -498,7 +171,7 @@ export namespace Worksets {
       const u = this.configUri
       if (!u) return
       const started = Date.now()
-      const toWrite: Types.State = {
+      const toWrite: State = {
         ...this._state,
         meta: {
           ...this._state.meta,
@@ -522,7 +195,9 @@ export namespace Worksets {
         this._lastSavedSignature = this.computeSignature(this._state)
         void this.updateCanSaveContext()
         const elapsed = Date.now() - started
-        this.out.appendLine(`[workscene] saveToDisk: ${elapsed}ms, size=${bytes.byteLength} bytes`)
+        this.out.appendLine(
+          `[workscene] saveToDisk: ${elapsed}ms, size=${bytes.byteLength} bytes`
+        )
       }
     }
 
@@ -547,8 +222,8 @@ export namespace Worksets {
     }
 
     /** Yalnızca anlamlı alanlardan deterministik imza üretir (timestamp hariç) */
-    private computeSignature(state: Types.State): string {
-      const simplifyGroup = (g: Types.Group): any => {
+    private computeSignature(state: State): string {
+      const simplifyGroup = (g: Group): any => {
         const children = (g.children ?? []).map(simplifyGroup)
         children.sort((a, b) => (a.name || "").localeCompare(b.name || ""))
         const files = (g.files ?? []).map((fe) => ({
@@ -558,8 +233,22 @@ export namespace Worksets {
           kind: fe.kind || "file",
         }))
         files.sort((a, b) =>
-          (a.rel + "\u0000" + a.name + "\u0000" + a.description + "\u0000" + a.kind).localeCompare(
-            b.rel + "\u0000" + b.name + "\u0000" + b.description + "\u0000" + b.kind
+          (
+            a.rel +
+            "\u0000" +
+            a.name +
+            "\u0000" +
+            a.description +
+            "\u0000" +
+            a.kind
+          ).localeCompare(
+            b.rel +
+              "\u0000" +
+              b.name +
+              "\u0000" +
+              b.description +
+              "\u0000" +
+              b.kind
           )
         )
         return {
@@ -592,7 +281,11 @@ export namespace Worksets {
     private async updateCanSaveContext(): Promise<void> {
       const current = this.computeSignature(this._state)
       const canSave = current !== this._lastSavedSignature
-      await vscode.commands.executeCommand("setContext", "workscene.canSave", canSave)
+      await vscode.commands.executeCommand(
+        "setContext",
+        "workscene.canSave",
+        canSave
+      )
     }
 
     refresh() {
@@ -605,34 +298,107 @@ export namespace Worksets {
     getChildren(el?: TreeItem): vscode.ProviderResult<TreeItem[]> {
       const s = this.state
       if (!el) {
-        const sourceGroups = this._groupFilter
-          ? s.groups.filter((g) =>
-              (g.name || "").toLowerCase().includes(this._groupFilter!.toLowerCase())
+        const items: TreeItem[] = []
+        const tagGroup = this.buildTagGroupItem()
+        if (tagGroup) items.push(tagGroup)
+        const roots = this.getFilteredRootGroups(s.groups)
+        for (const g of roots) {
+          items.push(new TreeGroupItem(g))
+        }
+        return items
+      }
+      if (el instanceof TreeTagGroupItem) {
+        const items: TreeItem[] = []
+        if (this._tagFilter) items.push(new TreeTagClearItem())
+        for (const info of el.tags) {
+          items.push(
+            new TreeTagItem(
+              info.tag,
+              info.count,
+              this.isSameTag(info.tag, this._tagFilter)
             )
-          : s.groups
-        return sourceGroups.map((g) => new TreeGroupItem(g, this.groupIconPath))
+          )
+        }
+        return items
+      }
+      if (el instanceof TreeTagItem || el instanceof TreeTagClearItem) {
+        return []
       }
       if (el instanceof TreeGroupItem)
-        return Utility.getGroupChildrenItems(
-          el.group,
-          s.meta.basePath,
-          this.groupIconPath
-        )
+        return getGroupChildrenItems(el.group, s.meta.basePath)
       return []
     }
 
     getParent(el: TreeItem): vscode.ProviderResult<TreeItem> {
       const s = this.state
+      if (el instanceof TreeTagItem || el instanceof TreeTagClearItem) {
+        return this.buildTagGroupItem() ?? null
+      }
+      if (el instanceof TreeTagGroupItem) return null
       if (el instanceof TreeFileItem) {
         const group = this.findGroupById(s.groups, el.groupId || "")?.group
-        return group ? new TreeGroupItem(group, this.groupIconPath) : null
+        return group ? new TreeGroupItem(group) : null
       }
       if (el instanceof TreeGroupItem) {
         const found = this.findGroupById(s.groups, el.group.id)
         const parent = found?.parent
-        return parent ? new TreeGroupItem(parent, this.groupIconPath) : null
+        return parent ? new TreeGroupItem(parent) : null
       }
       return null
+    }
+
+    private buildTagGroupItem(): TreeTagGroupItem | undefined {
+      const stats = this.getTagStats()
+      if (!stats.length && !this._tagFilter) return undefined
+      return new TreeTagGroupItem(stats, this._tagFilter)
+    }
+
+    private getFilteredRootGroups(groups: Group[]): Group[] {
+      let results = groups
+      if (this._tagFilter) {
+        results = results.filter((g) =>
+          this.groupMatchesTag(g, this._tagFilter!)
+        )
+      }
+      if (this._groupFilter) {
+        const needle = this._groupFilter.toLowerCase()
+        results = results.filter((g) =>
+          (g.name || "").toLowerCase().includes(needle)
+        )
+      }
+      return results
+    }
+
+    private getTagStats(): Array<{ tag: string; count: number }> {
+      const stats = new Map<string, { tag: string; count: number }>()
+      const visit = (nodes: Group[]) => {
+        for (const g of nodes) {
+          for (const tag of g.tags ?? []) {
+            const key = tag.toLowerCase()
+            const existing = stats.get(key)
+            if (existing) existing.count += 1
+            else stats.set(key, { tag, count: 1 })
+          }
+          if (g.children?.length) visit(g.children)
+        }
+      }
+      visit(this.state.groups)
+      return Array.from(stats.values()).sort((a, b) =>
+        a.tag.localeCompare(b.tag)
+      )
+    }
+
+    private groupMatchesTag(group: Group, tag: string): boolean {
+      if ((group.tags ?? []).some((t) => this.isSameTag(t, tag))) return true
+      for (const child of group.children ?? []) {
+        if (this.groupMatchesTag(child, tag)) return true
+      }
+      return false
+    }
+
+    private isSameTag(a: string, b: string | undefined): boolean {
+      if (!b) return false
+      return a.trim().toLowerCase() === b.trim().toLowerCase()
     }
 
     /** Aktif editör sekmelerindeki tüm dosyaları belirtilen gruba ekler veya seçim ister */
@@ -645,17 +411,20 @@ export namespace Worksets {
       const s = this.state
       const base = s.meta.basePath
       const rels = filePaths
-        .map((p) => Worksets.Utility.toRelativeFromFsPath(p, base))
+        .map((p) => toRelativeFromFsPath(p, base))
         .filter(Boolean)
 
-      let group: Types.Group | undefined
+      let group: Group | undefined
       if (target) {
         group = this.findGroupById(s.groups, target.group.id)?.group
       } else {
         // Grup seçimi veya yeni grup oluşturma
         const items = [
           { label: "$(new-folder) Yeni Grup...", id: "__new__" },
-          ...this.flattenGroups(s.groups).map((g) => ({ label: g.pathLabel, id: g.id })),
+          ...this.flattenGroups(s.groups).map((g) => ({
+            label: g.pathLabel,
+            id: g.id,
+          })),
         ]
         const picked = await vscode.window.showQuickPick(items, {
           placeHolder: "Sekmeleri eklenecek grubu seçin",
@@ -663,10 +432,19 @@ export namespace Worksets {
         if (!picked) return
         if (picked.id === "__new__") {
           const suggested = this.suggestGroupName(s.groups)
-          const name = await vscode.window.showInputBox({ prompt: "Yeni grup adı", value: suggested })
+          const name = await vscode.window.showInputBox({
+            prompt: "Yeni grup adı",
+            value: suggested,
+          })
           if (name === undefined) return
-          const finalName = (name.trim() || suggested)
-          const newG: Types.Group = { id: UUID(), name: finalName, files: [], children: [] }
+          const finalName = name.trim() || suggested
+          const newG: Group = {
+            id: UUID(),
+            name: finalName,
+            files: [],
+            children: [],
+            tags: [],
+          }
           s.groups.push(newG)
           group = newG
         } else {
@@ -695,7 +473,9 @@ export namespace Worksets {
       const s = this.state
       const base = s.meta.basePath
       const entries = item.group.files ?? []
-      const fileEntries = entries.filter((fe) => (fe.kind ?? "file") !== "folder")
+      const fileEntries = entries.filter(
+        (fe) => (fe.kind ?? "file") !== "folder"
+      )
       if (fileEntries.length === 0) {
         vscode.window.showInformationMessage("Bu grupta açılacak dosya yok.")
         return
@@ -724,17 +504,22 @@ export namespace Worksets {
       }
       for (let i = 0; i < fileEntries.length; i++) {
         const fe = fileEntries[i]
-        const uri = Worksets.Utility.fromRelativeToUri(fe.rel, base)
+        const uri = fromRelativeToUri(fe.rel, base)
         try {
           if (await this.revealExistingTab(uri)) continue
           const doc = await vscode.workspace.openTextDocument(uri)
-          await vscode.window.showTextDocument(doc, { preview: false, preserveFocus: i !== 0 })
+          await vscode.window.showTextDocument(doc, {
+            preview: false,
+            preserveFocus: i !== 0,
+          })
         } catch {
           // dosya açılamazsa yut ve devam et
         }
       }
       if (skippedFolders > 0) {
-        vscode.window.showInformationMessage(`${skippedFolders} klasör atlandı. Bu komut yalnızca dosyaları açar.`)
+        vscode.window.showInformationMessage(
+          `${skippedFolders} klasör atlandı. Bu komut yalnızca dosyaları açar.`
+        )
       }
     }
 
@@ -752,7 +537,11 @@ export namespace Worksets {
       }
       this._recentlyClosed = null
       if (this._undoCloseTimeout) clearTimeout(this._undoCloseTimeout)
-      await vscode.commands.executeCommand("setContext", "workscene.canUndoClose", false)
+      await vscode.commands.executeCommand(
+        "setContext",
+        "workscene.canUndoClose",
+        false
+      )
       vscode.window.showInformationMessage("Kapatılan sekmeler geri yüklendi.")
     }
 
@@ -765,7 +554,10 @@ export namespace Worksets {
           const tabUri = input.uri
           if (tabUri instanceof vscode.Uri && tabUri.fsPath === uri.fsPath) {
             const document = await vscode.workspace.openTextDocument(uri)
-            await vscode.window.showTextDocument(document, { viewColumn: group.viewColumn, preview: false })
+            await vscode.window.showTextDocument(document, {
+              viewColumn: group.viewColumn,
+              preview: false,
+            })
             return true
           }
         }
@@ -792,13 +584,22 @@ export namespace Worksets {
     async addGroup(target?: TreeGroupItem) {
       const s = this.state
       const siblings = target
-        ? (this.findGroupById(s.groups, target.group.id)?.group.children ?? [])
+        ? this.findGroupById(s.groups, target.group.id)?.group.children ?? []
         : s.groups
       const suggested = this.suggestGroupName(siblings)
-      const name = await vscode.window.showInputBox({ prompt: "Group name", value: suggested })
+      const name = await vscode.window.showInputBox({
+        prompt: "Group name",
+        value: suggested,
+      })
       if (name === undefined) return
       const finalName = name.trim() || suggested
-      const newG: Types.Group = { id: UUID(), name: finalName, files: [], children: [] }
+      const newG: Group = {
+        id: UUID(),
+        name: finalName,
+        files: [],
+        children: [],
+        tags: [],
+      }
       if (target) {
         const found = this.findGroupById(s.groups, target.group.id)
         ;(found?.group.children ?? (found!.group.children = [])).push(newG)
@@ -808,7 +609,9 @@ export namespace Worksets {
       this.state = s
       this._emitter.fire()
       // Reveal and select the newly created group, expanding parents if needed
-      setTimeout(() => { void this.revealGroupById(newG.id) }, 0)
+      setTimeout(() => {
+        void this.revealGroupById(newG.id)
+      }, 0)
     }
 
     async addSubGroup(target: TreeGroupItem) {
@@ -831,6 +634,28 @@ export namespace Worksets {
       }
     }
 
+    async editGroupTags(item: TreeGroupItem): Promise<void> {
+      const s = this.state
+      const target = this.findGroupById(s.groups, item.group.id)?.group
+      if (!target) return
+      const current = target.tags ?? []
+      const value = await vscode.window.showInputBox({
+        prompt: "Group tags (comma separated)",
+        placeHolder: "ör. ui, onboarding",
+        value: current.join(", "),
+      })
+      if (value === undefined) return
+      const parts = value
+        .split(",")
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0)
+      const normalized = normalizeTags(parts)
+      target.tags = normalized
+      this.state = s
+      this._emitter.fire(item)
+      void this.updateFilterContext()
+    }
+
     async remove(item?: TreeItem) {
       const targets = this.getSelectedItems(item).filter(
         (it): it is TreeGroupItem | TreeFileItem =>
@@ -851,8 +676,12 @@ export namespace Worksets {
             message = `"${name}" gruptan kaldırılacak. Devam edilsin mi?`
           }
         } else {
-          const groupCount = targets.filter((t) => t instanceof TreeGroupItem).length
-          const itemCount = targets.filter((t) => t instanceof TreeFileItem).length
+          const groupCount = targets.filter(
+            (t) => t instanceof TreeGroupItem
+          ).length
+          const itemCount = targets.filter(
+            (t) => t instanceof TreeFileItem
+          ).length
           const parts = [] as string[]
           if (groupCount) parts.push(`${groupCount} grup`)
           if (itemCount) parts.push(`${itemCount} öğe`)
@@ -883,7 +712,9 @@ export namespace Worksets {
       }
 
       const seenFiles = new Set<string>()
-      for (const fileItem of targets.filter((t): t is TreeFileItem => t instanceof TreeFileItem)) {
+      for (const fileItem of targets.filter(
+        (t): t is TreeFileItem => t instanceof TreeFileItem
+      )) {
         const groupId = fileItem.groupId
         if (!groupId) continue
         const key = `${groupId}|${fileItem.entry.rel}`
@@ -893,7 +724,9 @@ export namespace Worksets {
         if (!group) continue
         const base = s.meta.basePath
         const before = group.files.length
-        group.files = group.files.filter((fe) => !this.isSameRel(fe.rel, fileItem.entry.rel, base))
+        group.files = group.files.filter(
+          (fe) => !this.isSameRel(fe.rel, fileItem.entry.rel, base)
+        )
         if (group.files.length !== before) changed = true
       }
 
@@ -901,35 +734,43 @@ export namespace Worksets {
       this.state = s
       this._emitter.fire()
       if (targets.length > 1) {
-        vscode.window.showInformationMessage(`${targets.length} öğe kaldırıldı.`)
+        vscode.window.showInformationMessage(
+          `${targets.length} öğe kaldırıldı.`
+        )
       }
     }
 
-    private async pickFolderHandlingMode(placeHolder: string): Promise<FolderHandlingMode | undefined> {
+    private async pickFolderHandlingMode(
+      placeHolder: string
+    ): Promise<FolderHandlingMode | undefined> {
       type ModeItem = vscode.QuickPickItem & { value: FolderHandlingMode }
       const items: ModeItem[] = [
-        { label: "Add folders as items", description: "Keep folders as single entries", value: "folders" },
+        {
+          label: "Add folders as items",
+          description: "Keep folders as single entries",
+          value: "folders",
+        },
         { label: "Add first-level files only", value: "first" },
         { label: "Add all files recursively", value: "recursive" },
       ]
       const quickPick = vscode.window.createQuickPick<ModeItem>()
-      quickPick.items = items;
-      quickPick.placeholder = placeHolder;
-      quickPick.ignoreFocusOut = true;
+      quickPick.items = items
+      quickPick.placeholder = placeHolder
+      quickPick.ignoreFocusOut = true
       return await new Promise<FolderHandlingMode | undefined>((resolve) => {
-        let resolved = false;
-        (quickPick as any).activeItems = [items[0]];
+        let resolved = false
+        ;(quickPick as any).activeItems = [items[0]]
         quickPick.onDidAccept(() => {
           const selection = quickPick.activeItems[0] ?? items[0]
           resolved = true
-          resolve(selection.value);
-          quickPick.hide();
+          resolve(selection.value)
+          quickPick.hide()
         })
         quickPick.onDidHide(() => {
-          if (!resolved) resolve(undefined);
-          quickPick.dispose();
+          if (!resolved) resolve(undefined)
+          quickPick.dispose()
         })
-        quickPick.show();
+        quickPick.show()
       })
     }
 
@@ -948,11 +789,19 @@ export namespace Worksets {
       // if any folder present, ask how to handle
       let hasFolder = false
       for (const u of uris) {
-        try { const st = await vscode.workspace.fs.stat(u); if (st.type === vscode.FileType.Directory) { hasFolder = true; break } } catch {}
+        try {
+          const st = await vscode.workspace.fs.stat(u)
+          if (st.type === vscode.FileType.Directory) {
+            hasFolder = true
+            break
+          }
+        } catch {}
       }
       let mode: FolderHandlingMode = "folders"
       if (hasFolder) {
-        const picked = await this.pickFolderHandlingMode("Select how to add selected folders")
+        const picked = await this.pickFolderHandlingMode(
+          "Select how to add selected folders"
+        )
         if (!picked) return
         mode = picked
       }
@@ -960,21 +809,29 @@ export namespace Worksets {
         for (const u of uris) {
           try {
             const st = await vscode.workspace.fs.stat(u)
-            const rel = Utility.toRelativeFromFsPath(u.fsPath, base)
+            const rel = toRelativeFromFsPath(u.fsPath, base)
             if (st.type === vscode.FileType.Directory) {
-              if (!this.hasFileRel(g, rel, base)) g.files.push({ rel, kind: "folder" })
+              if (!this.hasFileRel(g, rel, base))
+                g.files.push({ rel, kind: "folder" })
             } else if (st.type === vscode.FileType.File) {
-              if (!this.hasFileRel(g, rel, base)) g.files.push({ rel, kind: "file" })
+              if (!this.hasFileRel(g, rel, base))
+                g.files.push({ rel, kind: "file" })
             }
           } catch {}
         }
       } else {
-        const fileUris = mode === "recursive"
-          ? (await Promise.all(uris.map((u) => Utility.collectFilesRecursively(u)))).flat()
-          : (await Promise.all(uris.map((u) => Utility.collectFilesFirstLevel(u)))).flat()
+        const fileUris =
+          mode === "recursive"
+            ? (
+                await Promise.all(uris.map((u) => collectFilesRecursively(u)))
+              ).flat()
+            : (
+                await Promise.all(uris.map((u) => collectFilesFirstLevel(u)))
+              ).flat()
         for (const u of fileUris) {
-          const rel = Utility.toRelativeFromFsPath(u.fsPath, base)
-          if (!this.hasFileRel(g, rel, base)) g.files.push({ rel, kind: "file" })
+          const rel = toRelativeFromFsPath(u.fsPath, base)
+          if (!this.hasFileRel(g, rel, base))
+            g.files.push({ rel, kind: "file" })
         }
       }
       this.state = s
@@ -982,20 +839,29 @@ export namespace Worksets {
     }
 
     /** Explorer seçiminden (dosya/klasör) gruba ekleme */
-    async addExplorerResourcesToGroup(resource?: vscode.Uri, resources?: vscode.Uri[]): Promise<void> {
-      const selected = (resources && resources.length ? resources : (resource ? [resource] : []))
-        .filter((u) => !!u && u.scheme === "file") as vscode.Uri[]
+    async addExplorerResourcesToGroup(
+      resource?: vscode.Uri,
+      resources?: vscode.Uri[]
+    ): Promise<void> {
+      const selected = (
+        resources && resources.length ? resources : resource ? [resource] : []
+      ).filter((u) => !!u && u.scheme === "file") as vscode.Uri[]
       if (selected.length === 0) {
-        vscode.window.showInformationMessage("Explorer'dan bir veya daha fazla öğe seçin.")
+        vscode.window.showInformationMessage(
+          "Explorer'dan bir veya daha fazla öğe seçin."
+        )
         return
       }
 
       const s = this.state
-      let group: Types.Group | undefined
+      let group: Group | undefined
       // Grup seçimi veya yeni grup oluşturma
       const items = [
         { label: "$(new-folder) Yeni Grup...", id: "__new__" },
-        ...this.flattenGroups(s.groups).map((g) => ({ label: g.pathLabel, id: g.id })),
+        ...this.flattenGroups(s.groups).map((g) => ({
+          label: g.pathLabel,
+          id: g.id,
+        })),
       ]
       const picked = await vscode.window.showQuickPick(items, {
         placeHolder: "Seçilenleri eklenecek grubu seçin",
@@ -1003,10 +869,19 @@ export namespace Worksets {
       if (!picked) return
       if (picked.id === "__new__") {
         const suggested = this.suggestGroupName(s.groups)
-        const name = await vscode.window.showInputBox({ prompt: "Yeni grup adı", value: suggested })
+        const name = await vscode.window.showInputBox({
+          prompt: "Yeni grup adı",
+          value: suggested,
+        })
         if (name === undefined) return
-        const finalName = (name.trim() || suggested)
-        const newG: Types.Group = { id: UUID(), name: finalName, files: [], children: [] }
+        const finalName = name.trim() || suggested
+        const newG: Group = {
+          id: UUID(),
+          name: finalName,
+          files: [],
+          children: [],
+          tags: [],
+        }
         s.groups.push(newG)
         group = newG
       } else {
@@ -1018,11 +893,19 @@ export namespace Worksets {
       // Eğer klasör varsa nasıl ekleneceğini sor
       let hasFolder = false
       for (const u of selected) {
-        try { const st = await vscode.workspace.fs.stat(u); if (st.type === vscode.FileType.Directory) { hasFolder = true; break } } catch {}
+        try {
+          const st = await vscode.workspace.fs.stat(u)
+          if (st.type === vscode.FileType.Directory) {
+            hasFolder = true
+            break
+          }
+        } catch {}
       }
       let mode: FolderHandlingMode = "folders"
       if (hasFolder) {
-        const picked = await this.pickFolderHandlingMode("Seçilen klasör(ler)i nasıl eklemek istersiniz?")
+        const picked = await this.pickFolderHandlingMode(
+          "Seçilen klasör(ler)i nasıl eklemek istersiniz?"
+        )
         if (!picked) return
         mode = picked
       } else {
@@ -1034,30 +917,52 @@ export namespace Worksets {
         for (const u of selected) {
           try {
             const st = await vscode.workspace.fs.stat(u)
-            const rel = Utility.toRelativeFromFsPath(u.fsPath, base)
+            const rel = toRelativeFromFsPath(u.fsPath, base)
             if (st.type === vscode.FileType.Directory) {
-              if (!this.hasFileRel(group, rel, base)) { group.files.push({ rel, kind: "folder" }); added++ }
+              if (!this.hasFileRel(group, rel, base)) {
+                group.files.push({ rel, kind: "folder" })
+                added++
+              }
             } else if (st.type === vscode.FileType.File) {
-              if (!this.hasFileRel(group, rel, base)) { group.files.push({ rel, kind: "file" }); added++ }
+              if (!this.hasFileRel(group, rel, base)) {
+                group.files.push({ rel, kind: "file" })
+                added++
+              }
             }
           } catch {}
         }
       } else {
-        const expanded = mode === "recursive"
-          ? (await Promise.all(selected.map((u) => Utility.collectFilesRecursively(u)))).flat()
-          : (await Promise.all(selected.map((u) => Utility.collectFilesFirstLevel(u)))).flat()
+        const expanded =
+          mode === "recursive"
+            ? (
+                await Promise.all(
+                  selected.map((u) => collectFilesRecursively(u))
+                )
+              ).flat()
+            : (
+                await Promise.all(
+                  selected.map((u) => collectFilesFirstLevel(u))
+                )
+              ).flat()
         for (const u of expanded) {
-          const rel = Utility.toRelativeFromFsPath(u.fsPath, base)
-          if (!this.hasFileRel(group, rel, base)) { group.files.push({ rel, kind: "file" }); added++ }
+          const rel = toRelativeFromFsPath(u.fsPath, base)
+          if (!this.hasFileRel(group, rel, base)) {
+            group.files.push({ rel, kind: "file" })
+            added++
+          }
         }
       }
 
       if (added > 0) {
         this.state = s
         this._emitter.fire()
-        vscode.window.showInformationMessage(`${group.name} grubuna ${added} öğe eklendi.`)
+        vscode.window.showInformationMessage(
+          `${group.name} grubuna ${added} öğe eklendi.`
+        )
       } else {
-        vscode.window.showInformationMessage("Seçilen tüm öğeler zaten grupta mevcut.")
+        vscode.window.showInformationMessage(
+          "Seçilen tüm öğeler zaten grupta mevcut."
+        )
       }
     }
 
@@ -1081,7 +986,9 @@ export namespace Worksets {
         const src = this.findGroupById(s.groups, groupId)?.group
         if (!src) continue
         const before = src.files.length
-        src.files = src.files.filter((f) => !this.isSameRel(f.rel, item.entry.rel, base))
+        src.files = src.files.filter(
+          (f) => !this.isSameRel(f.rel, item.entry.rel, base)
+        )
         if (src.files.length === before) continue
         if (!this.hasFileRel(dst, item.entry.rel, base)) {
           dst.files.push(item.entry)
@@ -1091,7 +998,9 @@ export namespace Worksets {
       if (!moved) return
       this.state = s
       this._emitter.fire()
-      vscode.window.showInformationMessage(`${moved} öğe ${target.group.name} grubuna taşındı.`)
+      vscode.window.showInformationMessage(
+        `${moved} öğe ${target.group.name} grubuna taşındı.`
+      )
     }
 
     async sortGroup(item: TreeGroupItem): Promise<void> {
@@ -1112,7 +1021,7 @@ export namespace Worksets {
         const abs = base ? path.join(base, rel) : rel
         if (mode === "fileType") return (path.extname(abs) || "").toLowerCase()
         if (mode === "alphabetical") return path.basename(abs).toLowerCase()
-        return Worksets.Utility.labelForTopFolder(abs).toLowerCase()
+        return labelForTopFolder(abs).toLowerCase()
       }
       g.files.sort((a, b) => key(a.rel).localeCompare(key(b.rel)))
       this.state = s
@@ -1128,18 +1037,50 @@ export namespace Worksets {
       if (filter === undefined) return
       const trimmed = filter.trim()
       this._groupFilter = trimmed === "" ? undefined : trimmed
-      await vscode.commands.executeCommand(
-        "setContext",
-        "workscene.hasFilter",
-        !!this._groupFilter
-      )
+      void this.updateFilterContext()
       this.refresh()
     }
 
     async clearGroupFilter(): Promise<void> {
       this._groupFilter = undefined
-      await vscode.commands.executeCommand("setContext", "workscene.hasFilter", false)
+      this._tagFilter = undefined
+      void this.updateFilterContext()
       this.refresh()
+    }
+
+    async applyTagFilter(tag: string): Promise<void> {
+      if (!tag) return
+      if (this.isSameTag(tag, this._tagFilter)) {
+        await this.clearTagFilter()
+        return
+      }
+      this._tagFilter = tag
+      void this.updateFilterContext()
+      this.refresh()
+    }
+
+    async clearTagFilter(): Promise<void> {
+      if (!this._tagFilter) return
+      this._tagFilter = undefined
+      void this.updateFilterContext()
+      this.refresh()
+    }
+
+    private async updateFilterContext(): Promise<void> {
+      const hasFilter = !!(
+        (this._groupFilter && this._groupFilter.trim()) ||
+        (this._tagFilter && this._tagFilter.trim())
+      )
+      await vscode.commands.executeCommand(
+        "setContext",
+        "workscene.hasFilter",
+        hasFilter
+      )
+      await vscode.commands.executeCommand(
+        "setContext",
+        "workscene.activeTag",
+        this._tagFilter ?? null
+      )
     }
 
     async changeGroupIcon(item?: TreeGroupItem): Promise<void> {
@@ -1154,7 +1095,10 @@ export namespace Worksets {
       ]
 
       const picked = await vscode.window.showQuickPick(items, {
-        placeHolder: targets.length > 1 ? "Grup simgesi (tüm seçilenler)" : "Grup Simgesi...",
+        placeHolder:
+          targets.length > 1
+            ? "Grup simgesi (tüm seçilenler)"
+            : "Grup Simgesi...",
       })
       if (!picked) return
       const s = this.state
@@ -1176,37 +1120,32 @@ export namespace Worksets {
       this.state = s
       this._emitter.fire()
       if (targets.length > 1) {
-        vscode.window.showInformationMessage(`${targets.length} grup simgesi güncellendi.`)
+        vscode.window.showInformationMessage(
+          `${targets.length} grup simgesi güncellendi.`
+        )
       }
     }
 
     async changeGroupColor(item?: TreeGroupItem): Promise<void> {
       const targets = this.getGroupTargets(item)
       if (targets.length === 0) return
-
-      const colors = [
-        { label: "Kırmızı", value: "terminal.ansiRed" },
-        { label: "Sarı", value: "terminal.ansiYellow" },
-        { label: "Macenta", value: "terminal.ansiMagenta" },
-        { label: "Blue", value: "terminal.ansiBlue" },
-        { label: "Mavi", value: "terminal.ansiCyan" },
-        { label: "Yeşil", value: "terminal.ansiGreen" },
-      ]
       const extra = vscode.workspace
         .getConfiguration("workscene")
         .get<string[]>("extraColors", [])
         .filter((s) => typeof s === "string" && s.trim().length > 0)
         .map((s) => s.trim())
-      const twItems = twColorsHex.map((c) => ({ label: c.name, value: c.hex }))
+
       const items = [
         { label: "Default", value: "__default__" },
-        ...colors.map((c) => ({ label: c.label, value: c.value })),
         ...extra.map((v) => ({ label: v, value: v })),
-        ...twItems,
+        ...twColorsHex,
         { label: "Custom Hex…", value: "__custom_hex__" },
       ]
       const picked = await vscode.window.showQuickPick(items, {
-        placeHolder: targets.length > 1 ? "Seçili gruplar için renk" : "Select a color for this group",
+        placeHolder:
+          targets.length > 1
+            ? "Seçili gruplar için renk"
+            : "Select a color for this group",
       })
       if (!picked) return
       let resolved: string | null
@@ -1218,7 +1157,9 @@ export namespace Worksets {
           prompt: "Hex color (e.g. #FF8800)",
           placeHolder: "#RRGGBB",
           validateInput: (v) =>
-            (/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(v.trim()) ? undefined : "Geçerli bir hex renk girin"),
+            /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(v.trim())
+              ? undefined
+              : "Geçerli bir hex renk girin",
         })
         if (!hexInput) return
         const hex = this.normalizeHex(hexInput)
@@ -1252,7 +1193,9 @@ export namespace Worksets {
       this.state = s
       this._emitter.fire()
       if (targets.length > 1) {
-        vscode.window.showInformationMessage(`${targets.length} grubun rengi güncellendi.`)
+        vscode.window.showInformationMessage(
+          `${targets.length} grubun rengi güncellendi.`
+        )
       }
     }
 
@@ -1260,36 +1203,55 @@ export namespace Worksets {
     private normalizeHex(v: string): string {
       const t = v.trim()
       if (/^#[0-9a-fA-F]{3}$/.test(t)) {
-        const r = t[1], g = t[2], b = t[3]
+        const r = t[1],
+          g = t[2],
+          b = t[3]
         return `#${r}${r}${g}${g}${b}${b}`.toUpperCase()
       }
       return t.toUpperCase()
     }
 
     /** Map hex to a custom theming color token via workbench.colorCustomizations */
-    private async ensureThemeTokenForHex(hex: string): Promise<string | undefined> {
-      const tokenPool = Array.from({ length: 10 }, (_, i) => `workscene.color.custom${i + 1}`)
+    private async ensureThemeTokenForHex(
+      hex: string
+    ): Promise<string | undefined> {
+      const tokenPool = Array.from(
+        { length: 10 },
+        (_, i) => `workscene.color.custom${i + 1}`
+      )
       const config = vscode.workspace.getConfiguration()
       const current = config.get<any>("workbench.colorCustomizations") || {}
       for (const t of tokenPool) {
-        if (typeof current[t] === "string" && String(current[t]).toUpperCase() === hex.toUpperCase()) {
+        if (
+          typeof current[t] === "string" &&
+          String(current[t]).toUpperCase() === hex.toUpperCase()
+        ) {
           return t
         }
       }
-      const free = tokenPool.find((t) => !current[t]) ?? tokenPool[tokenPool.length - 1]
+      const free =
+        tokenPool.find((t) => !current[t]) ?? tokenPool[tokenPool.length - 1]
       const next = { ...current, [free]: hex }
       try {
-        await config.update("workbench.colorCustomizations", next, vscode.ConfigurationTarget.Workspace)
+        await config.update(
+          "workbench.colorCustomizations",
+          next,
+          vscode.ConfigurationTarget.Workspace
+        )
         return free
       } catch {
-        vscode.window.showErrorMessage("Hex rengi uygularken ayar güncellenemedi.")
+        vscode.window.showErrorMessage(
+          "Hex rengi uygularken ayar güncellenemedi."
+        )
         return undefined
       }
     }
 
     private async revealGroupById(id: string): Promise<void> {
       if (!this._view) return
-      const findIn = async (items: TreeItem[]): Promise<TreeGroupItem | undefined> => {
+      const findIn = async (
+        items: TreeItem[]
+      ): Promise<TreeGroupItem | undefined> => {
         for (const it of items) {
           if (it instanceof TreeGroupItem && it.group.id === id) return it
           if (it instanceof TreeGroupItem) {
@@ -1304,7 +1266,11 @@ export namespace Worksets {
       const target = await findIn(roots)
       if (target) {
         try {
-          await this._view.reveal(target, { select: true, focus: true, expand: true })
+          await this._view.reveal(target, {
+            select: true,
+            focus: true,
+            expand: true,
+          })
         } catch {}
       }
     }
@@ -1335,11 +1301,11 @@ export namespace Worksets {
       try {
         const buf = await vscode.workspace.fs.readFile(uri)
         const text = new TextDecoder("utf-8").decode(buf)
-        const data = JSON.parse(text) as Partial<Types.State>
-        const imported = Worksets.Utility.ensureStateWithMeta(data)
+        const data = JSON.parse(text) as Partial<State>
+        const imported = ensureStateWithMeta(data)
         const s = this.state
         // clone and re-id groups to avoid collisions
-        const reId = (g: Types.Group): Types.Group => ({
+        const reId = (g: Group): Group => ({
           id: UUID(),
           name: g.name,
           files: [...(g.files ?? [])],
@@ -1368,7 +1334,7 @@ export namespace Worksets {
       )
       if (!picked) return
       const found = this.findGroupById(groups, picked.id)!.group
-      return new TreeGroupItem(found, this.groupIconPath)
+      return new TreeGroupItem(found)
     }
 
     async editFileAliasDescription(item: TreeFileItem) {
@@ -1423,6 +1389,13 @@ export namespace Worksets {
       target: TreeItem | undefined,
       dataTransfer: vscode.DataTransfer
     ): Promise<void> {
+      if (
+        target &&
+        !(target instanceof TreeGroupItem) &&
+        !(target instanceof TreeFileItem)
+      ) {
+        return
+      }
       // 1) Önceliği dahili payload'a ver (ağaç içi taşıma). Bu sayede
       //    resourceUri nedeniyle gelen "text/uri-list" iç sürükle-bırakları gölgelemez.
       const internal = dataTransfer.get(
@@ -1431,7 +1404,12 @@ export namespace Worksets {
       if (internal && target) {
         try {
           const moved = JSON.parse(await internal.asString()) as Array<
-            | { type: "file"; rel: string; from: string; kind?: "file" | "folder" }
+            | {
+                type: "file"
+                rel: string
+                from: string
+                kind?: "file" | "folder"
+              }
             | { type: "group"; id: string }
           >
           const s = this.state
@@ -1445,7 +1423,9 @@ export namespace Worksets {
             if (m.type === "file") {
               const fromGroup = this.findGroupById(s.groups, m.from)?.group
               if (fromGroup) {
-                fromGroup.files = fromGroup.files.filter((u) => !this.isSameRel(u.rel, m.rel, s.meta.basePath))
+                fromGroup.files = fromGroup.files.filter(
+                  (u) => !this.isSameRel(u.rel, m.rel, s.meta.basePath)
+                )
               }
               if (!this.hasFileRel(toGroup, m.rel, s.meta.basePath))
                 toGroup.files.push({ rel: m.rel, kind: m.kind || "file" })
@@ -1475,16 +1455,28 @@ export namespace Worksets {
         const base = s.meta.basePath
         let uris: vscode.Uri[] = []
         for (const raw of list) {
-          try { uris.push(vscode.Uri.parse(raw)) } catch { /* yut */ }
+          try {
+            uris.push(vscode.Uri.parse(raw))
+          } catch {
+            /* yut */
+          }
         }
         // Inspect for folders
         let hasFolder = false
         for (const u of uris) {
-          try { const st = await vscode.workspace.fs.stat(u); if (st.type === vscode.FileType.Directory) { hasFolder = true; break } } catch {}
+          try {
+            const st = await vscode.workspace.fs.stat(u)
+            if (st.type === vscode.FileType.Directory) {
+              hasFolder = true
+              break
+            }
+          } catch {}
         }
         let mode: FolderHandlingMode = "folders"
         if (hasFolder) {
-          const picked = await this.pickFolderHandlingMode("Select how to add dropped folder(s)")
+          const picked = await this.pickFolderHandlingMode(
+            "Select how to add dropped folder(s)"
+          )
           if (!picked) return
           mode = picked
         }
@@ -1492,21 +1484,29 @@ export namespace Worksets {
           for (const u of uris) {
             try {
               const st = await vscode.workspace.fs.stat(u)
-              const rel = Utility.toRelativeFromFsPath(u.fsPath, base)
+              const rel = toRelativeFromFsPath(u.fsPath, base)
               if (st.type === vscode.FileType.Directory) {
-                if (!this.hasFileRel(g, rel, base)) g.files.push({ rel, kind: "folder" })
+                if (!this.hasFileRel(g, rel, base))
+                  g.files.push({ rel, kind: "folder" })
               } else if (st.type === vscode.FileType.File) {
-                if (!this.hasFileRel(g, rel, base)) g.files.push({ rel, kind: "file" })
+                if (!this.hasFileRel(g, rel, base))
+                  g.files.push({ rel, kind: "file" })
               }
             } catch {}
           }
         } else {
-          const expanded = mode === "recursive"
-            ? (await Promise.all(uris.map((u) => Utility.collectFilesRecursively(u)))).flat()
-            : (await Promise.all(uris.map((u) => Utility.collectFilesFirstLevel(u)))).flat()
+          const expanded =
+            mode === "recursive"
+              ? (
+                  await Promise.all(uris.map((u) => collectFilesRecursively(u)))
+                ).flat()
+              : (
+                  await Promise.all(uris.map((u) => collectFilesFirstLevel(u)))
+                ).flat()
           for (const u of expanded) {
-            const rel = Utility.toRelativeFromFsPath(u.fsPath, base)
-            if (!this.hasFileRel(g, rel, base)) g.files.push({ rel, kind: "file" })
+            const rel = toRelativeFromFsPath(u.fsPath, base)
+            if (!this.hasFileRel(g, rel, base))
+              g.files.push({ rel, kind: "file" })
           }
         }
         this.state = s
@@ -1516,12 +1516,12 @@ export namespace Worksets {
     }
 
     private findGroupById(
-      groups: Types.Group[],
+      groups: Group[],
       id: string
-    ): { group: Types.Group; parent?: Types.Group } | undefined {
-      const stack: { node: Types.Group; parent?: Types.Group }[] = groups.map(
-        (g) => ({ node: g })
-      )
+    ): { group: Group; parent?: Group } | undefined {
+      const stack: { node: Group; parent?: Group }[] = groups.map((g) => ({
+        node: g,
+      }))
       while (stack.length) {
         const { node, parent } = stack.shift()!
         if (node.id === id) return { group: node, parent }
@@ -1531,7 +1531,7 @@ export namespace Worksets {
       return undefined
     }
 
-    private removeGroupById(groups: Types.Group[], id: string): boolean {
+    private removeGroupById(groups: Group[], id: string): boolean {
       const idx = groups.findIndex((g) => g.id === id)
       if (idx !== -1) {
         groups.splice(idx, 1)
@@ -1543,10 +1543,7 @@ export namespace Worksets {
       return false
     }
 
-    private detachGroupById(
-      groups: Types.Group[],
-      id: string
-    ): Types.Group | undefined {
+    private detachGroupById(groups: Group[], id: string): Group | undefined {
       const idx = groups.findIndex((g) => g.id === id)
       if (idx !== -1) {
         const [g] = groups.splice(idx, 1)
@@ -1562,17 +1559,19 @@ export namespace Worksets {
     }
 
     private isSameRel(a: string, b: string, base: string): boolean {
-      const ua = Worksets.Utility.fromRelativeToUri(a, base)
-      const ub = Worksets.Utility.fromRelativeToUri(b, base)
-      return Worksets.Utility.toPosix(ua.fsPath).toLowerCase() === Worksets.Utility.toPosix(ub.fsPath).toLowerCase()
+      const ua = fromRelativeToUri(a, base)
+      const ub = fromRelativeToUri(b, base)
+      return (
+        toPosix(ua.fsPath).toLowerCase() === toPosix(ub.fsPath).toLowerCase()
+      )
     }
 
-    private hasFileRel(g: Types.Group, rel: string, base: string): boolean {
+    private hasFileRel(g: Group, rel: string, base: string): boolean {
       return (g.files ?? []).some((fe) => this.isSameRel(fe.rel, rel, base))
     }
 
     private isAncestor(
-      groups: Types.Group[],
+      groups: Group[],
       ancestorId: string,
       nodeId: string
     ): boolean {
@@ -1588,7 +1587,7 @@ export namespace Worksets {
     }
 
     private flattenGroups(
-      groups: Types.Group[],
+      groups: Group[],
       prefix = ""
     ): { id: string; pathLabel: string }[] {
       const out: { id: string; pathLabel: string }[] = []
@@ -1603,7 +1602,7 @@ export namespace Worksets {
     }
 
     /** Aynı seviyedeki kardeş gruplara göre benzersiz bir ad önerir. */
-    private suggestGroupName(siblings: Types.Group[]): string {
+    private suggestGroupName(siblings: Group[]): string {
       const base = "Group"
       const names = new Set((siblings || []).map((g) => (g.name || "").trim()))
       if (!names.has(base)) return base
@@ -1615,56 +1614,6 @@ export namespace Worksets {
       return `${base}.${Date.now()}`
     }
   }
-
 }
 
-export namespace Worksets {
-  export class UngroupedProvider implements vscode.TreeDataProvider<Worksets.TreeFileItem> {
-    private _emitter = new vscode.EventEmitter<Worksets.TreeFileItem | undefined | void>()
-    readonly onDidChangeTreeData = this._emitter.event
-
-    constructor(private readonly provider: Worksets.Provider) {}
-
-    refresh(): void {
-      this._emitter.fire()
-    }
-
-    getTreeItem(el: Worksets.TreeFileItem): vscode.TreeItem { return el }
-
-    getChildren(): vscode.ProviderResult<Worksets.TreeFileItem[]> {
-      const open = this.getOpenEditorFilePaths()
-      const s: any = (this.provider as any)._state as Worksets.Types.State
-      const base = s.meta.basePath
-      const grouped = new Set<string>()
-      const visit = (g: Worksets.Types.Group) => {
-        for (const f of g.files) grouped.add(f.rel)
-        for (const c of g.children ?? []) visit(c)
-      }
-      for (const g of s.groups) visit(g)
-      const out: Worksets.TreeFileItem[] = []
-      for (const abs of open) {
-        const rel = Worksets.Utility.toRelativeFromFsPath(abs, base)
-        if (!grouped.has(rel)) {
-          const fe: Worksets.Types.FileEntry = { rel }
-          out.push(new Worksets.TreeFileItem(vscode.Uri.file(abs), "ungrouped", fe))
-        }
-      }
-      return out
-    }
-
-    private getOpenEditorFilePaths(): string[] {
-      const allTabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
-      const out: string[] = []
-      for (const tab of allTabs) {
-        const input: any = (tab as any).input
-        if (input && typeof input === "object" && "uri" in input) {
-          const uri: any = input.uri
-          if (uri instanceof vscode.Uri && uri.scheme === "file") {
-            out.push(uri.fsPath)
-          }
-        }
-      }
-      return out
-    }
-  }
-}
+export default Worksets

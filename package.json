@@ -16,29 +16,6 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    "onView:worksceneView",
-    "onView:worksceneUngroupedView",
-    "onCommand:workscene.addGroup",
-    "onCommand:workscene.addSubGroup",
-    "onCommand:workscene.addToGroupFromExplorer",
-    "onCommand:workscene.addFiles",
-    "onCommand:workscene.addOpenTabsToGroup",
-    "onCommand:workscene.renameGroup",
-    "onCommand:workscene.remove",
-    "onCommand:workscene.moveToGroup",
-    "onCommand:workscene.editFileMeta",
-    "onCommand:workscene.refresh",
-    "onCommand:workscene.saveNow",
-    "onCommand:workscene.sortGroup",
-    "onCommand:workscene.filterGroups",
-    "onCommand:workscene.clearFilter",
-    "onCommand:workscene.changeGroupIcon",
-    "onCommand:workscene.changeGroupColor",
-    "onCommand:workscene.export",
-    "onCommand:workscene.import",
-    "onCommand:workscene.undoCloseEditors"
-  ],
   "main": "./out/extension.js",
   "contributes": {
     "colors": [
@@ -163,13 +140,6 @@
           "contextualTitle": "Workscene",
           "visibility": "visible",
           "icon": "$(folder-library)"
-        },
-        {
-          "id": "worksceneUngroupedView",
-          "name": "Ungrouped Tabs",
-          "contextualTitle": "Ungrouped Tabs",
-          "visibility": "visible",
-          "icon": "$(folder-library)"
         }
       ]
     },
@@ -253,6 +223,11 @@
         "icon": "$(paintcan)"
       },
       {
+        "command": "workscene.editGroupTags",
+        "title": "Etiketleri Düzenle...",
+        "icon": "$(tag)"
+      },
+      {
         "command": "workscene.export",
         "title": "Dışa Aktar",
         "icon": "$(cloud-upload)"
@@ -266,6 +241,17 @@
         "command": "workscene.undoCloseEditors",
         "title": "Kapatılan Dosyaları Geri Al",
         "icon": "$(history)"
+      },
+      {
+        "command": "workscene.applyTagFilter",
+        "title": "Etikete Göre Filtrele",
+        "category": "Workscene"
+      },
+      {
+        "command": "workscene.clearTagFilter",
+        "title": "Etiket Filtresini Temizle",
+        "category": "Workscene",
+        "icon": "$(clear-all)"
       }
     ],
     "menus": {
@@ -348,6 +334,11 @@
           "group": "navigation@7"
         },
         {
+          "command": "workscene.editGroupTags",
+          "when": "view == worksceneView && viewItem == group",
+          "group": "navigation@8"
+        },
+        {
           "command": "workscene.remove",
           "when": "view == worksceneView && viewItem == group && workscene.action.remove",
           "group": "inline@8"
@@ -375,6 +366,16 @@
           "when": "view == worksceneView && viewItem == group"
         }
       ],
+      "commandPalette": [
+        {
+          "command": "workscene.applyTagFilter",
+          "when": "false"
+        },
+        {
+          "command": "workscene.clearTagFilter",
+          "when": "false"
+        }
+      ],
       "explorer/context": [
         {
           "command": "workscene.addToGroupFromExplorer",
@@ -387,10 +388,6 @@
       {
         "view": "worksceneView",
         "contents": "Henüz bir grup yok. [Yeni Grup Ekle](command:workscene.addGroup)"
-      },
-      {
-        "view": "worksceneUngroupedView",
-        "contents": "Açık olup hiçbir gruba eklenmemiş sekmeler burada listelenir."
       }
     ],
     "configuration": {

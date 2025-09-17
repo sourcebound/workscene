@@ -1,17 +1,16 @@
-## Workscene — Xcode esinli mantıksal grup görünümü
+## Workscene — Mantıksal Dosya Gruplama
 
 Workscene, büyük projelerde dosyalarınızı dosya sistemi yapısını değiştirmeden organize etmenizi sağlayan bir Explorer görünümüdür. Xcode’daki “Group” modelinden esinlenir: dosyaları mantıksal gruplar halinde bir araya getirir; klasör/taşıma yapmaz, git geçmişinizi kirletmez.
+
+### Grup vs. Klasör
+- Klasör: Dosya sisteminde gerçek dizindir; taşıma/yeniden adlandırma dosya sistemini etkiler.
+- Grup: Proje içi mantıksal koleksiyondur; disk yapısını etkilemez. Klasöre eşlenmek zorunda değildir.
 
 ### Neden Workscene?
 - Mantıksal gruplar: Diskteki klasör yapısını değiştirmeden düzenleyin.
 - Büyük projelerde hız: İlgili dosyaları tek bakışta görün, hızlı açın.
 - Kaynak kontrol dostu: Fiziksel taşıma/yeniden adlandırma yok.
 
-### Gruplar vs. Klasörler (Xcode modeli)
-- Klasör: Dosya sisteminde gerçek dizindir; taşıma/yeniden adlandırma dosya sistemini etkiler.
-- Grup: Proje içi mantıksal koleksiyondur; disk yapısını etkilemez. Klasöre eşlenmek zorunda değildir.
-
-Referans: Apple Developer – Managing files and folders in your Xcode project: `https://developer.apple.com/documentation/xcode/managing-files-and-folders-in-your-xcode-project`
 
 ### Özellikler
 - Explorer’da özel “Workscene” paneli

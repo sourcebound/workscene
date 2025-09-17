@@ -1,0 +1,16 @@
+import * as vscode from "vscode"
+import Meta from "@type/meta"
+/**
+ * state.ts
+ *
+ * Kalıcı durumun (JSON) normalize edilmesi, meta bilgisinin doldurulması ve
+ * sürüm/kök yol bilgilerinin güncel tutulmasından sorumludur.
+ */
+
+/** Aktif workspace kökünden meta üretir. */
+export function getDefaultMeta(): Meta {
+  const ws = vscode.workspace.workspaceFolders?.[0]
+  const basePath = ws ? ws.uri.fsPath : ""
+  const now = new Date().toISOString()
+  return { basePath, createdAt: now, updatedAt: now, version: 1 }
+}
