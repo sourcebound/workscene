@@ -2,28 +2,112 @@
   "name": "workscene",
   "displayName": "Workscene",
   "description": "Xcode-style logical groups without touching the filesystem. Drag from Explorer, persist in workscene.config.json.",
-  "version": "0.0.1",
+  "version": "0.2.1",
   "license": "AGPL-3.0-only",
   "publisher": "sourcebound",
   "engines": {
     "vscode": "^1.84.0"
   },
+  "repository": {
+  "type": "git",
+  "url": "https://github.com/sourcebound/workscene.git"
+},
   "categories": [
     "Other"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "colors": [
-      { "id": "workscene.color.custom1", "description": "Workscene custom color slot 1", "defaults": { "dark": "#FF8A00", "light": "#FF8A00", "highContrast": "#FF8A00" } },
-      { "id": "workscene.color.custom2", "description": "Workscene custom color slot 2", "defaults": { "dark": "#E91E63", "light": "#E91E63", "highContrast": "#E91E63" } },
-      { "id": "workscene.color.custom3", "description": "Workscene custom color slot 3", "defaults": { "dark": "#9C27B0", "light": "#9C27B0", "highContrast": "#9C27B0" } },
-      { "id": "workscene.color.custom4", "description": "Workscene custom color slot 4", "defaults": { "dark": "#3F51B5", "light": "#3F51B5", "highContrast": "#3F51B5" } },
-      { "id": "workscene.color.custom5", "description": "Workscene custom color slot 5", "defaults": { "dark": "#03A9F4", "light": "#03A9F4", "highContrast": "#03A9F4" } },
-      { "id": "workscene.color.custom6", "description": "Workscene custom color slot 6", "defaults": { "dark": "#009688", "light": "#009688", "highContrast": "#009688" } },
-      { "id": "workscene.color.custom7", "description": "Workscene custom color slot 7", "defaults": { "dark": "#4CAF50", "light": "#4CAF50", "highContrast": "#4CAF50" } },
-      { "id": "workscene.color.custom8", "description": "Workscene custom color slot 8", "defaults": { "dark": "#8BC34A", "light": "#8BC34A", "highContrast": "#8BC34A" } },
-      { "id": "workscene.color.custom9", "description": "Workscene custom color slot 9", "defaults": { "dark": "#CDDC39", "light": "#CDDC39", "highContrast": "#CDDC39" } },
-      { "id": "workscene.color.custom10", "description": "Workscene custom color slot 10", "defaults": { "dark": "#FFC107", "light": "#FFC107", "highContrast": "#FFC107" } }
+      {
+        "id": "workscene.color.custom1",
+        "description": "Workscene custom color slot 1",
+        "defaults": {
+          "dark": "#FF8A00",
+          "light": "#FF8A00",
+          "highContrast": "#FF8A00"
+        }
+      },
+      {
+        "id": "workscene.color.custom2",
+        "description": "Workscene custom color slot 2",
+        "defaults": {
+          "dark": "#E91E63",
+          "light": "#E91E63",
+          "highContrast": "#E91E63"
+        }
+      },
+      {
+        "id": "workscene.color.custom3",
+        "description": "Workscene custom color slot 3",
+        "defaults": {
+          "dark": "#9C27B0",
+          "light": "#9C27B0",
+          "highContrast": "#9C27B0"
+        }
+      },
+      {
+        "id": "workscene.color.custom4",
+        "description": "Workscene custom color slot 4",
+        "defaults": {
+          "dark": "#3F51B5",
+          "light": "#3F51B5",
+          "highContrast": "#3F51B5"
+        }
+      },
+      {
+        "id": "workscene.color.custom5",
+        "description": "Workscene custom color slot 5",
+        "defaults": {
+          "dark": "#03A9F4",
+          "light": "#03A9F4",
+          "highContrast": "#03A9F4"
+        }
+      },
+      {
+        "id": "workscene.color.custom6",
+        "description": "Workscene custom color slot 6",
+        "defaults": {
+          "dark": "#009688",
+          "light": "#009688",
+          "highContrast": "#009688"
+        }
+      },
+      {
+        "id": "workscene.color.custom7",
+        "description": "Workscene custom color slot 7",
+        "defaults": {
+          "dark": "#4CAF50",
+          "light": "#4CAF50",
+          "highContrast": "#4CAF50"
+        }
+      },
+      {
+        "id": "workscene.color.custom8",
+        "description": "Workscene custom color slot 8",
+        "defaults": {
+          "dark": "#8BC34A",
+          "light": "#8BC34A",
+          "highContrast": "#8BC34A"
+        }
+      },
+      {
+        "id": "workscene.color.custom9",
+        "description": "Workscene custom color slot 9",
+        "defaults": {
+          "dark": "#CDDC39",
+          "light": "#CDDC39",
+          "highContrast": "#CDDC39"
+        }
+      },
+      {
+        "id": "workscene.color.custom10",
+        "description": "Workscene custom color slot 10",
+        "defaults": {
+          "dark": "#FFC107",
+          "light": "#FFC107",
+          "highContrast": "#FFC107"
+        }
+      }
     ],
     "keybindings": [
       {
@@ -300,14 +384,21 @@
         },
         "workscene.itemAccessoryActionIds": {
           "type": "array",
-          "default": ["add-subgroup", "remove"],
-          "items": { "type": "string" },
+          "default": [
+            "add-subgroup",
+            "remove"
+          ],
+          "items": {
+            "type": "string"
+          },
           "description": "Which inline buttons are visible for group items (only affects inline, not context menu). Valid ids: add-subgroup, remove."
         },
         "workscene.extraColors": {
           "type": "array",
           "default": [],
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Additional themable color IDs to offer in the group color picker (e.g. 'editorWarning.foreground', 'charts.orange')."
         }
       }

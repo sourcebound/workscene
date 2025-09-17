@@ -56,6 +56,8 @@ export namespace Worksets {
     }
   }
 
+  type FolderHandlingMode = "folders" | "first" | "recursive"
+
   export namespace Utility {
     /**
      * state.ts
@@ -114,13 +116,13 @@ export namespace Worksets {
       base: string
     ): Types.FileEntry {
       if (typeof input === "string") {
-        return { rel: normalizeEntry(input, base) }
+        return { rel: normalizeEntry(input, base), kind: "file" }
       }
       return {
         rel: normalizeEntry(input.rel, base),
         name: input.name,
         description: input.description,
-        kind: input.kind,
+        kind: input.kind ?? "file",
       }
     }
 
@@ -352,11 +354,7 @@ export namespace Worksets {
       this.description = entry.description
       if (entry.kind === "folder") {
         this.iconPath = new vscode.ThemeIcon("folder")
-        this.command = {
-          command: "revealInExplorer",
-          title: "Reveal Folder",
-          arguments: [uri],
-        }
+        this.command = undefined
       } else {
         this.command = {
           command: "vscode.open",
@@ -679,7 +677,7 @@ export namespace Worksets {
       let added = 0
       for (const rel of rels) {
         if (!this.hasFileRel(group, rel, base)) {
-          group.files.push({ rel })
+          group.files.push({ rel, kind: "file" })
           added++
         }
       }
@@ -696,11 +694,13 @@ export namespace Worksets {
     async openAllInGroup(item: TreeGroupItem): Promise<void> {
       const s = this.state
       const base = s.meta.basePath
-      const files = item.group.files
-      if (!files || files.length === 0) {
+      const entries = item.group.files ?? []
+      const fileEntries = entries.filter((fe) => (fe.kind ?? "file") !== "folder")
+      if (fileEntries.length === 0) {
         vscode.window.showInformationMessage("Bu grupta açılacak dosya yok.")
         return
       }
+      const skippedFolders = entries.length - fileEntries.length
       const autoClose = vscode.workspace
         .getConfiguration("workscene")
         .get<boolean>("autoCloseOnOpenAll", false)
@@ -722,8 +722,8 @@ export namespace Worksets {
         }, 5000)
         await vscode.commands.executeCommand("workbench.action.closeAllEditors")
       }
-      for (let i = 0; i < files.length; i++) {
-        const fe = files[i]
+      for (let i = 0; i < fileEntries.length; i++) {
+        const fe = fileEntries[i]
         const uri = Worksets.Utility.fromRelativeToUri(fe.rel, base)
         try {
           if (await this.revealExistingTab(uri)) continue
@@ -732,6 +732,9 @@ export namespace Worksets {
         } catch {
           // dosya açılamazsa yut ve devam et
         }
+      }
+      if (skippedFolders > 0) {
+        vscode.window.showInformationMessage(`${skippedFolders} klasör atlandı. Bu komut yalnızca dosyaları açar.`)
       }
     }
 
@@ -849,10 +852,10 @@ export namespace Worksets {
           }
         } else {
           const groupCount = targets.filter((t) => t instanceof TreeGroupItem).length
-          const fileCount = targets.filter((t) => t instanceof TreeFileItem).length
+          const itemCount = targets.filter((t) => t instanceof TreeFileItem).length
           const parts = [] as string[]
           if (groupCount) parts.push(`${groupCount} grup`)
-          if (fileCount) parts.push(`${fileCount} dosya`)
+          if (itemCount) parts.push(`${itemCount} öğe`)
           const summary = parts.join(", ") || `${targets.length} öğe`
           message = `Seçili ${summary} kaldırılacak. Devam edilsin mi?`
         }
@@ -902,6 +905,34 @@ export namespace Worksets {
       }
     }
 
+    private async pickFolderHandlingMode(placeHolder: string): Promise<FolderHandlingMode | undefined> {
+      type ModeItem = vscode.QuickPickItem & { value: FolderHandlingMode }
+      const items: ModeItem[] = [
+        { label: "Add folders as items", description: "Keep folders as single entries", value: "folders" },
+        { label: "Add first-level files only", value: "first" },
+        { label: "Add all files recursively", value: "recursive" },
+      ]
+      const quickPick = vscode.window.createQuickPick<ModeItem>()
+      quickPick.items = items;
+      quickPick.placeholder = placeHolder;
+      quickPick.ignoreFocusOut = true;
+      return await new Promise<FolderHandlingMode | undefined>((resolve) => {
+        let resolved = false;
+        (quickPick as any).activeItems = [items[0]];
+        quickPick.onDidAccept(() => {
+          const selection = quickPick.activeItems[0] ?? items[0]
+          resolved = true
+          resolve(selection.value);
+          quickPick.hide();
+        })
+        quickPick.onDidHide(() => {
+          if (!resolved) resolve(undefined);
+          quickPick.dispose();
+        })
+        quickPick.show();
+      })
+    }
+
     async addFiles(target?: TreeGroupItem) {
       const group = target ?? (await this.pickGroup())
       if (!group) return
@@ -919,15 +950,11 @@ export namespace Worksets {
       for (const u of uris) {
         try { const st = await vscode.workspace.fs.stat(u); if (st.type === vscode.FileType.Directory) { hasFolder = true; break } } catch {}
       }
-      let mode: "folders" | "first" | "recursive" = "folders"
+      let mode: FolderHandlingMode = "folders"
       if (hasFolder) {
-        const picked = await vscode.window.showQuickPick([
-          { label: "Add folders as items", value: "folders" },
-          { label: "Add first-level files only", value: "first" },
-          { label: "Add all files recursively", value: "recursive" },
-        ], { placeHolder: "Select how to add selected folders" })
+        const picked = await this.pickFolderHandlingMode("Select how to add selected folders")
         if (!picked) return
-        mode = picked.value as any
+        mode = picked
       }
       if (mode === "folders") {
         for (const u of uris) {
@@ -993,15 +1020,11 @@ export namespace Worksets {
       for (const u of selected) {
         try { const st = await vscode.workspace.fs.stat(u); if (st.type === vscode.FileType.Directory) { hasFolder = true; break } } catch {}
       }
-      let mode: "folders" | "first" | "recursive" = "folders"
+      let mode: FolderHandlingMode = "folders"
       if (hasFolder) {
-        const p = await vscode.window.showQuickPick([
-          { label: "Add folders as items", value: "folders" },
-          { label: "Add first-level files only", value: "first" },
-          { label: "Add all files recursively", value: "recursive" },
-        ], { placeHolder: "Seçilen klasör(ler)i nasıl eklemek istersiniz?" })
-        if (!p) return
-        mode = p.value as any
+        const picked = await this.pickFolderHandlingMode("Seçilen klasör(ler)i nasıl eklemek istersiniz?")
+        if (!picked) return
+        mode = picked
       } else {
         mode = "first"
       }
@@ -1068,7 +1091,7 @@ export namespace Worksets {
       if (!moved) return
       this.state = s
       this._emitter.fire()
-      vscode.window.showInformationMessage(`${moved} dosya ${target.group.name} grubuna taşındı.`)
+      vscode.window.showInformationMessage(`${moved} öğe ${target.group.name} grubuna taşındı.`)
     }
 
     async sortGroup(item: TreeGroupItem): Promise<void> {
@@ -1459,15 +1482,11 @@ export namespace Worksets {
         for (const u of uris) {
           try { const st = await vscode.workspace.fs.stat(u); if (st.type === vscode.FileType.Directory) { hasFolder = true; break } } catch {}
         }
-        let mode: "folders" | "first" | "recursive" = "folders"
+        let mode: FolderHandlingMode = "folders"
         if (hasFolder) {
-          const picked = await vscode.window.showQuickPick([
-            { label: "Add folders as items", value: "folders" },
-            { label: "Add first-level files only", value: "first" },
-            { label: "Add all files recursively", value: "recursive" },
-          ], { placeHolder: "Select how to add dropped folder(s)" })
+          const picked = await this.pickFolderHandlingMode("Select how to add dropped folder(s)")
           if (!picked) return
-          mode = picked.value as any
+          mode = picked
         }
         if (mode === "folders") {
           for (const u of uris) {
