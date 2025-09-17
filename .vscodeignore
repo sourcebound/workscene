@@ -1,0 +1,14 @@
+# Exclude everything by default
+**/*
+
+# Include only the files required for the published extension
+!package.json
+!README.md
+!LICENSE
+!LICENSE.txt
+!out/**
+!media/**
+!logo.png
+media/.DS_Store
+!node_modules/uuid/**
+**/.DS_Store

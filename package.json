@@ -2,9 +2,10 @@
   "name": "workscene",
   "displayName": "Workscene",
   "description": "Xcode-style logical groups without touching the filesystem. Drag from Explorer, persist in workscene.config.json.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "license": "AGPL-3.0-only",
   "publisher": "sourcebound",
+  "icon": "logo.png",
   "engines": {
     "vscode": "^1.84.0"
   },
@@ -14,6 +15,29 @@
 },
   "categories": [
     "Other"
+  ],
+  "activationEvents": [
+    "onView:worksceneView",
+    "onView:worksceneUngroupedView",
+    "onCommand:workscene.addGroup",
+    "onCommand:workscene.addSubGroup",
+    "onCommand:workscene.addToGroupFromExplorer",
+    "onCommand:workscene.addFiles",
+    "onCommand:workscene.addOpenTabsToGroup",
+    "onCommand:workscene.renameGroup",
+    "onCommand:workscene.remove",
+    "onCommand:workscene.moveToGroup",
+    "onCommand:workscene.editFileMeta",
+    "onCommand:workscene.refresh",
+    "onCommand:workscene.saveNow",
+    "onCommand:workscene.sortGroup",
+    "onCommand:workscene.filterGroups",
+    "onCommand:workscene.clearFilter",
+    "onCommand:workscene.changeGroupIcon",
+    "onCommand:workscene.changeGroupColor",
+    "onCommand:workscene.export",
+    "onCommand:workscene.import",
+    "onCommand:workscene.undoCloseEditors"
   ],
   "main": "./out/extension.js",
   "contributes": {
