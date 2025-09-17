@@ -408,6 +408,38 @@ export namespace Worksets {
       this._view = view
     }
 
+    /**
+     * Resolve the effective selection for a command. If the view already has a
+     * selection, return that while ensuring the primary item is part of it.
+     */
+    private getSelectedItems(primary?: TreeItem): TreeItem[] {
+      const selection = this._view?.selection ?? []
+      if (!selection.length && primary) return [primary]
+      if (!selection.length) return []
+      const set = new Set<TreeItem>()
+      for (const it of selection) set.add(it)
+      if (primary) set.add(primary)
+      return Array.from(set)
+    }
+
+    private getGroupTargets(primary?: TreeGroupItem): TreeGroupItem[] {
+      const selected = this.getSelectedItems(primary)
+      const groups = selected.filter((it): it is TreeGroupItem => it instanceof TreeGroupItem)
+      if (groups.length === 0 && primary instanceof TreeGroupItem) {
+        return [primary]
+      }
+      return groups
+    }
+
+    private getFileTargets(primary?: TreeFileItem): TreeFileItem[] {
+      const selected = this.getSelectedItems(primary)
+      const files = selected.filter((it): it is TreeFileItem => it instanceof TreeFileItem)
+      if (files.length === 0 && primary instanceof TreeFileItem) {
+        return [primary]
+      }
+      return files
+    }
+
     private async init(): Promise<void> {
       const u = this.configUri
       if (u) {
@@ -796,17 +828,34 @@ export namespace Worksets {
       }
     }
 
-    async remove(item: TreeItem) {
+    async remove(item?: TreeItem) {
+      const targets = this.getSelectedItems(item).filter(
+        (it): it is TreeGroupItem | TreeFileItem =>
+          it instanceof TreeGroupItem || it instanceof TreeFileItem
+      )
+      if (targets.length === 0) return
       const cfg = vscode.workspace.getConfiguration("workscene")
       const confirm = cfg.get<boolean>("confirmBeforeRemove", true)
       if (confirm) {
-        const isGroup = item instanceof TreeGroupItem
-        const name = isGroup
-          ? (item as TreeGroupItem).group.name
-          : (item as TreeFileItem).entry.name || (item as TreeFileItem).entry.rel
-        const message = isGroup
-          ? `"${name}" grubu ve alt öğeleri kaldırılacak. Devam edilsin mi?`
-          : `"${name}" gruptan kaldırılacak. Devam edilsin mi?`
+        let message: string
+        if (targets.length === 1) {
+          const single = targets[0]
+          if (single instanceof TreeGroupItem) {
+            const name = single.group.name
+            message = `"${name}" grubu ve alt öğeleri kaldırılacak. Devam edilsin mi?`
+          } else {
+            const name = single.entry.name || single.entry.rel
+            message = `"${name}" gruptan kaldırılacak. Devam edilsin mi?`
+          }
+        } else {
+          const groupCount = targets.filter((t) => t instanceof TreeGroupItem).length
+          const fileCount = targets.filter((t) => t instanceof TreeFileItem).length
+          const parts = [] as string[]
+          if (groupCount) parts.push(`${groupCount} grup`)
+          if (fileCount) parts.push(`${fileCount} dosya`)
+          const summary = parts.join(", ") || `${targets.length} öğe`
+          message = `Seçili ${summary} kaldırılacak. Devam edilsin mi?`
+        }
         const picked = await vscode.window.showWarningMessage(
           message,
           { modal: true },
@@ -815,20 +864,42 @@ export namespace Worksets {
         )
         if (picked !== "Kaldır") return
       }
-
       const s = this.state
-      if (item instanceof TreeGroupItem) {
-        this.removeGroupById(s.groups, item.group.id)
-      } else {
-        const g = this.findGroupById(s.groups, (item as TreeFileItem).groupId!)?.group
-        if (g) {
-          const base = s.meta.basePath
-          const rel = (item as TreeFileItem).entry.rel
-          g.files = g.files.filter((fe) => !this.isSameRel(fe.rel, rel, base))
+      let changed = false
+      const uniqueGroups = Array.from(
+        new Map(
+          targets
+            .filter((t): t is TreeGroupItem => t instanceof TreeGroupItem)
+            .map((g) => [g.group.id, g] as const)
+        ).values()
+      )
+      for (const groupItem of uniqueGroups) {
+        if (this.removeGroupById(s.groups, groupItem.group.id)) {
+          changed = true
         }
       }
+
+      const seenFiles = new Set<string>()
+      for (const fileItem of targets.filter((t): t is TreeFileItem => t instanceof TreeFileItem)) {
+        const groupId = fileItem.groupId
+        if (!groupId) continue
+        const key = `${groupId}|${fileItem.entry.rel}`
+        if (seenFiles.has(key)) continue
+        seenFiles.add(key)
+        const group = this.findGroupById(s.groups, groupId)?.group
+        if (!group) continue
+        const base = s.meta.basePath
+        const before = group.files.length
+        group.files = group.files.filter((fe) => !this.isSameRel(fe.rel, fileItem.entry.rel, base))
+        if (group.files.length !== before) changed = true
+      }
+
+      if (!changed) return
       this.state = s
       this._emitter.fire()
+      if (targets.length > 1) {
+        vscode.window.showInformationMessage(`${targets.length} öğe kaldırıldı.`)
+      }
     }
 
     async addFiles(target?: TreeGroupItem) {
@@ -967,18 +1038,37 @@ export namespace Worksets {
       }
     }
 
-    async moveToGroup(fileItem: TreeFileItem) {
+    async moveToGroup(fileItem?: TreeFileItem) {
+      const targets = this.getFileTargets(fileItem)
+      if (targets.length === 0) return
       const target = await this.pickGroup()
       if (!target) return
       const s = this.state
-      const src = this.findGroupById(s.groups, fileItem.groupId!)?.group
       const dst = this.findGroupById(s.groups, target.group.id)?.group
-      if (!src || !dst) return
-      const rel = fileItem.entry.rel
-      src.files = src.files.filter((f) => !this.isSameRel(f.rel, rel, s.meta.basePath))
-      if (!this.hasFileRel(dst, rel, s.meta.basePath)) dst.files.push(fileItem.entry)
+      if (!dst) return
+      const base = s.meta.basePath
+      const seen = new Set<string>()
+      let moved = 0
+      for (const item of targets) {
+        const groupId = item.groupId
+        if (!groupId) continue
+        const key = `${groupId}|${item.entry.rel}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        const src = this.findGroupById(s.groups, groupId)?.group
+        if (!src) continue
+        const before = src.files.length
+        src.files = src.files.filter((f) => !this.isSameRel(f.rel, item.entry.rel, base))
+        if (src.files.length === before) continue
+        if (!this.hasFileRel(dst, item.entry.rel, base)) {
+          dst.files.push(item.entry)
+        }
+        moved++
+      }
+      if (!moved) return
       this.state = s
       this._emitter.fire()
+      vscode.window.showInformationMessage(`${moved} dosya ${target.group.name} grubuna taşındı.`)
     }
 
     async sortGroup(item: TreeGroupItem): Promise<void> {
@@ -1029,7 +1119,10 @@ export namespace Worksets {
       this.refresh()
     }
 
-    async changeGroupIcon(item: TreeGroupItem): Promise<void> {
+    async changeGroupIcon(item?: TreeGroupItem): Promise<void> {
+      const targets = this.getGroupTargets(item)
+      if (targets.length === 0) return
+
       const icons = productIcons
       const items = [
         { label: "Default (star)", id: "__default__" },
@@ -1038,19 +1131,36 @@ export namespace Worksets {
       ]
 
       const picked = await vscode.window.showQuickPick(items, {
-        placeHolder: "Grup Simgesi...",
+        placeHolder: targets.length > 1 ? "Grup simgesi (tüm seçilenler)" : "Grup Simgesi...",
       })
       if (!picked) return
       const s = this.state
-      const g = this.findGroupById(s.groups, item.group.id)?.group
-      if (!g) return
-      if (picked.id === "__default__") delete g.iconId
-      else g.iconId = picked.id
+      let changed = false
+      for (const target of targets) {
+        const g = this.findGroupById(s.groups, target.group.id)?.group
+        if (!g) continue
+        if (picked.id === "__default__") {
+          if (g.iconId !== undefined) {
+            delete g.iconId
+            changed = true
+          }
+        } else if (g.iconId !== picked.id) {
+          g.iconId = picked.id
+          changed = true
+        }
+      }
+      if (!changed) return
       this.state = s
-      this._emitter.fire(item)
+      this._emitter.fire()
+      if (targets.length > 1) {
+        vscode.window.showInformationMessage(`${targets.length} grup simgesi güncellendi.`)
+      }
     }
 
-    async changeGroupColor(item: TreeGroupItem): Promise<void> {
+    async changeGroupColor(item?: TreeGroupItem): Promise<void> {
+      const targets = this.getGroupTargets(item)
+      if (targets.length === 0) return
+
       const colors = [
         { label: "Kırmızı", value: "terminal.ansiRed" },
         { label: "Sarı", value: "terminal.ansiYellow" },
@@ -1073,33 +1183,54 @@ export namespace Worksets {
         { label: "Custom Hex…", value: "__custom_hex__" },
       ]
       const picked = await vscode.window.showQuickPick(items, {
-        placeHolder: "Select a color for this group",
+        placeHolder: targets.length > 1 ? "Seçili gruplar için renk" : "Select a color for this group",
       })
       if (!picked) return
+      let resolved: string | null
       const s = this.state
-      const g = this.findGroupById(s.groups, item.group.id)?.group
-      if (!g) return
       if (picked.value === "__default__") {
-        delete g.colorName
+        resolved = null
       } else if (picked.value === "__custom_hex__") {
         const hexInput = await vscode.window.showInputBox({
           prompt: "Hex color (e.g. #FF8800)",
           placeHolder: "#RRGGBB",
-          validateInput: (v) => (/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(v.trim()) ? undefined : "Geçerli bir hex renk girin")
+          validateInput: (v) =>
+            (/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(v.trim()) ? undefined : "Geçerli bir hex renk girin"),
         })
         if (!hexInput) return
         const hex = this.normalizeHex(hexInput)
         const token = await this.ensureThemeTokenForHex(hex)
-        if (token) g.colorName = token
+        if (!token) return
+        resolved = token
       } else if (/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(picked.value)) {
         const hex = this.normalizeHex(picked.value)
         const token = await this.ensureThemeTokenForHex(hex)
-        if (token) g.colorName = token
+        if (!token) return
+        resolved = token
       } else {
-        g.colorName = picked.value
+        resolved = picked.value
       }
+
+      let changed = false
+      for (const target of targets) {
+        const g = this.findGroupById(s.groups, target.group.id)?.group
+        if (!g) continue
+        if (resolved === null) {
+          if (g.colorName !== undefined) {
+            delete g.colorName
+            changed = true
+          }
+        } else if (g.colorName !== resolved) {
+          g.colorName = resolved
+          changed = true
+        }
+      }
+      if (!changed) return
       this.state = s
-      this._emitter.fire(item)
+      this._emitter.fire()
+      if (targets.length > 1) {
+        vscode.window.showInformationMessage(`${targets.length} grubun rengi güncellendi.`)
+      }
     }
 
     /** Convert #RGB to #RRGGBB and uppercase */

@@ -90,15 +90,18 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand(
       "workscene.remove",
       (it?: Worksets.TreeItem) => {
-        const target =
-          it ??
-          ((treeView.selection?.[0] as Worksets.TreeItem | undefined) ?? undefined)
-        if (target) return provider.remove(target)
+        const selection = treeView.selection ?? []
+        const fallback = selection.length ? (selection[0] as Worksets.TreeItem) : undefined
+        return provider.remove(it ?? fallback)
       }
     ),
     vscode.commands.registerCommand(
       "workscene.moveToGroup",
-      (it: Worksets.TreeFileItem) => provider.moveToGroup(it)
+      (it?: Worksets.TreeFileItem) => {
+        const selection = treeView.selection ?? []
+        const fallback = selection.find((sel): sel is Worksets.TreeFileItem => sel instanceof Worksets.TreeFileItem)
+        return provider.moveToGroup(it ?? fallback)
+      }
     ),
     vscode.commands.registerCommand(
       "workscene.editFileMeta",
@@ -118,11 +121,19 @@ export function activate(context: vscode.ExtensionContext) {
     ),
     vscode.commands.registerCommand(
       "workscene.changeGroupIcon",
-      (g: Worksets.TreeGroupItem) => provider.changeGroupIcon(g)
+      (g?: Worksets.TreeGroupItem) => {
+        const selection = treeView.selection ?? []
+        const fallback = selection.find((sel): sel is Worksets.TreeGroupItem => sel instanceof Worksets.TreeGroupItem)
+        return provider.changeGroupIcon(g ?? fallback)
+      }
     ),
     vscode.commands.registerCommand(
       "workscene.changeGroupColor",
-      (g: Worksets.TreeGroupItem) => provider.changeGroupColor(g)
+      (g?: Worksets.TreeGroupItem) => {
+        const selection = treeView.selection ?? []
+        const fallback = selection.find((sel): sel is Worksets.TreeGroupItem => sel instanceof Worksets.TreeGroupItem)
+        return provider.changeGroupColor(g ?? fallback)
+      }
     ),
     vscode.commands.registerCommand(
       "workscene.export",
