@@ -10,9 +10,9 @@
     "vscode": "^1.84.0"
   },
   "repository": {
-  "type": "git",
-  "url": "https://github.com/sourcebound/workscene.git"
-},
+    "type": "git",
+    "url": "https://github.com/sourcebound/workscene.git"
+  },
   "categories": [
     "Other"
   ],
@@ -437,6 +437,7 @@
     "typescript": "^5.6.2"
   },
   "dependencies": {
+    "change-case": "^5.4.4",
     "uuid": "^11.1.0"
   }
 }

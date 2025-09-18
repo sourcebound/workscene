@@ -1,19 +1,21 @@
 import * as vscode from "vscode"
 import { TextDecoder } from "util"
-import Worksets from "./worksets"
+import Provider from "./model/provider"
 import { CONFIG_FILE_BASENAME, VIEW_ID } from "@lib/constants"
 import State from "@type/state"
 import TreeItem from "@model/tree-item"
 import { TreeGroupItem } from "@model/tree-group-item"
 import { TreeFileItem } from "@model/tree-file-item"
 import { ensureStateWithMeta } from "./util/normalize"
+import { makeCommandId, EXTENSION_ID, makeViewTitle } from "@lib/constants"
+
 /**
  *
- * Eklentinin giriş noktası. Modüler yapıya ayrılmış sınıf ve yardımcıları
+ * @description Eklentinin giriş noktası. Modüler yapıya ayrılmış sınıf ve yardımcıları
  * buradan içe aktarılır, TreeView oluşturulur ve komutlar kaydedilir.
  */
 export function activate(context: vscode.ExtensionContext) {
-  const provider = new Worksets.Provider(context)
+  const provider = new Provider(context)
 
   const treeView = vscode.window.createTreeView(VIEW_ID, {
     treeDataProvider: provider,
@@ -28,7 +30,7 @@ export function activate(context: vscode.ExtensionContext) {
     treeView.onDidChangeSelection(async (e) => {
       const sel = e.selection?.[0]
       const kind = sel instanceof TreeGroupItem ? "group" : sel instanceof TreeFileItem ? "file" : undefined
-      await vscode.commands.executeCommand("setContext", "workscene.focusedKind", kind)
+      await vscode.commands.executeCommand("setContext", makeCommandId("focusedKind"), kind)
     })
   )
   context.subscriptions.push(
@@ -42,7 +44,7 @@ export function activate(context: vscode.ExtensionContext) {
   const updateTitle = () => {
     const ws = vscode.workspace.workspaceFolders?.[0]
     const projectName = ws?.name
-    treeView.title = projectName ? `Workscene (${projectName})` : "Workscene"
+    treeView.title = makeViewTitle(projectName)
   }
   updateTitle()
   context.subscriptions.push(
@@ -50,25 +52,25 @@ export function activate(context: vscode.ExtensionContext) {
   )
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("workscene.addGroup", () => {
+    vscode.commands.registerCommand(makeCommandId("addGroup"), () => {
       const sel = treeView.selection?.[0]
       if (sel instanceof TreeGroupItem) return provider.addGroup(sel)
       return provider.addGroup()
     }),
     vscode.commands.registerCommand(
-      "workscene.addSubGroup",
+      makeCommandId("addSubGroup"),
       (g: TreeGroupItem) => provider.addSubGroup(g)
     ),
     vscode.commands.registerCommand(
-      "workscene.openAllInGroup",
+      makeCommandId("openAllInGroup"),
       (g: TreeGroupItem) => provider.openAllInGroup(g)
     ),
     vscode.commands.registerCommand(
-      "workscene.addOpenTabsToGroup",
+      makeCommandId("addOpenTabsToGroup"),
       (g?: TreeGroupItem) => provider.addOpenTabsToGroup(g)
     ),
     vscode.commands.registerCommand(
-      "workscene.renameGroup",
+      makeCommandId("renameGroup"),
       (g?: TreeGroupItem) => {
         const target =
           g ??
@@ -79,11 +81,11 @@ export function activate(context: vscode.ExtensionContext) {
       }
     ),
     vscode.commands.registerCommand(
-      "workscene.addFiles",
+      makeCommandId("addFiles"),
       (g?: TreeGroupItem) => provider.addFiles(g)
     ),
     vscode.commands.registerCommand(
-      "workscene.remove",
+      makeCommandId("remove"),
       (it?: TreeItem) => {
         const selection = treeView.selection ?? []
         const fallback = selection.length ? (selection[0] as TreeItem) : undefined
@@ -91,7 +93,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
     ),
     vscode.commands.registerCommand(
-      "workscene.moveToGroup",
+      makeCommandId("moveToGroup"),
       (it?: TreeFileItem) => {
         const selection = treeView.selection ?? []
         const fallback = selection.find((sel): sel is TreeFileItem => sel instanceof TreeFileItem)
@@ -99,23 +101,23 @@ export function activate(context: vscode.ExtensionContext) {
       }
     ),
     vscode.commands.registerCommand(
-      "workscene.editFileMeta",
+      makeCommandId("editFileMeta"),
       (it: TreeFileItem) => provider.editFileAliasDescription(it)
     ),
     vscode.commands.registerCommand(
-      "workscene.sortGroup",
+      makeCommandId("sortGroup"),
       (g: TreeGroupItem) => provider.sortGroup(g)
     ),
     vscode.commands.registerCommand(
-      "workscene.filterGroups",
+      makeCommandId("filterGroups"),
       () => provider.setGroupFilter()
     ),
     vscode.commands.registerCommand(
-      "workscene.clearFilter",
+      makeCommandId("clearFilter"),
       () => provider.clearGroupFilter()
     ),
     vscode.commands.registerCommand(
-      "workscene.changeGroupIcon",
+      makeCommandId("changeGroupIcon"),
       (g?: TreeGroupItem) => {
         const selection = treeView.selection ?? []
         const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
@@ -123,7 +125,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
     ),
     vscode.commands.registerCommand(
-      "workscene.changeGroupColor",
+      makeCommandId("changeGroupColor"),
       (g?: TreeGroupItem) => {
         const selection = treeView.selection ?? []
         const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
@@ -131,7 +133,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
     ),
     vscode.commands.registerCommand(
-      "workscene.editGroupTags",
+      makeCommandId("editGroupTags"),
       (g?: TreeGroupItem) => {
         const selection = treeView.selection ?? []
         const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
@@ -140,39 +142,39 @@ export function activate(context: vscode.ExtensionContext) {
       }
     ),
     vscode.commands.registerCommand(
-      "workscene.export",
+      makeCommandId("export"),
       () => provider.exportGroupsToFile()
     ),
     vscode.commands.registerCommand(
-      "workscene.import",
+      makeCommandId("import"),
       () => provider.importGroupsFromFile()
     ),
     vscode.commands.registerCommand(
-      "workscene.undoCloseEditors",
+      makeCommandId("undoCloseEditors"),
       () => provider.undoCloseEditors()
     ),
-    vscode.commands.registerCommand("workscene.saveNow", async () => {
+    vscode.commands.registerCommand(makeCommandId("saveNow"), async () => {
       // UI'yi anında güncelle: menüden düşsün
-      await vscode.commands.executeCommand("setContext", "workscene.canSave", false)
+      await vscode.commands.executeCommand("setContext", makeCommandId("canSave"), false)
       try {
         await provider.saveNow()
       } catch (err) {
         // Hata olursa yeniden etkinleştir ve bildir
-        await vscode.commands.executeCommand("setContext", "workscene.canSave", true)
+        await vscode.commands.executeCommand("setContext", makeCommandId("canSave"), true)
         vscode.window.showErrorMessage("Kaydetme başarısız oldu.")
       }
     }),
-    vscode.commands.registerCommand("workscene.refresh", () =>
+    vscode.commands.registerCommand(makeCommandId("refresh"), () =>
       provider.refresh()
     ),
     // Explorer bağlam menüsü: seçilen öğeleri gruba ekle
     vscode.commands.registerCommand(
-      "workscene.addToGroupFromExplorer",
+      makeCommandId("addToGroupFromExplorer"),
       (resource: vscode.Uri, selected?: vscode.Uri[]) =>
         provider.addExplorerResourcesToGroup(resource, selected)
     ),
     vscode.commands.registerCommand(
-      "workscene.expandAll",
+      makeCommandId("expandAll"),
       async () => {
         const roots = (await provider.getChildren()) as any[]
         if (!roots || roots.length === 0) return
@@ -184,18 +186,18 @@ export function activate(context: vscode.ExtensionContext) {
       }
     ),
     vscode.commands.registerCommand(
-      "workscene.applyTagFilter",
+      makeCommandId("applyTagFilter"),
       (tag: string) => provider.applyTagFilter(tag)
     ),
     vscode.commands.registerCommand(
-      "workscene.clearTagFilter",
+      makeCommandId("clearTagFilter"),
       () => provider.clearTagFilter()
     )
   )
 
   // Inline accessory visibility (only affects inline buttons): add-subgroup, remove
   const applyActionVisibilityFromConfig = async () => {
-    const cfg = vscode.workspace.getConfiguration("workscene")
+    const cfg = vscode.workspace.getConfiguration(EXTENSION_ID)
     const ids = (
       cfg.get<string[]>("itemAccessoryActionIds") ||
       cfg.get<string[]>("itemAccesoryActionsIds") ||
@@ -206,7 +208,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const allow = new Set(ids)
     const set = (key: string, value: boolean) =>
-      vscode.commands.executeCommand("setContext", `workscene.action.${key}`, value)
+      vscode.commands.executeCommand("setContext", makeCommandId(`action.${key}`), value)
 
     const allKeys = ["add-subgroup", "remove"]
     await Promise.all(allKeys.map((k) => set(k, false)))
@@ -216,8 +218,8 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (
-        e.affectsConfiguration("workscene.itemAccessoryActionIds") ||
-        e.affectsConfiguration("workscene.itemAccesoryActionsIds")
+        e.affectsConfiguration(makeCommandId("itemAccessoryActionIds")) ||
+        e.affectsConfiguration(makeCommandId("itemAccesoryActionsIds"))
       ) {
         void applyActionVisibilityFromConfig()
       }

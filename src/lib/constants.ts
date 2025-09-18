@@ -1,3 +1,5 @@
+import * as changeCase from "change-case"
+
 /**
  * constants.ts
  *
@@ -19,3 +21,14 @@ export const CONFIG_FILE_BASENAME = "workscene.config.json"
  * @description Görünüm kimliği (package.json → contributes.views.explorer[].id ile eşleşmeli)
  */
 export const VIEW_ID = "worksceneView"
+
+export const APP_NAME = "Workscene"
+
+export const EXTENSION_ID = APP_NAME.toLowerCase()
+
+/**
+ * @description Makes a unique identifier for the command
+ */
+export const makeCommandId = (command: string) => `${EXTENSION_ID}.${command}`
+
+export const makeViewTitle = (title?: string) => title ? `${APP_NAME} (${title})` : APP_NAME
