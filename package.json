@@ -2,7 +2,7 @@
   "name": "workscene",
   "displayName": "Workscene",
   "description": "Xcode-style logical groups without touching the filesystem. Drag from Explorer, persist in workscene.config.json.",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "license": "AGPL-3.0-only",
   "publisher": "sourcebound",
   "icon": "logo.png",
