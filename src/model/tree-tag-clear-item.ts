@@ -1,8 +1,9 @@
 import * as vscode from 'vscode'
 import TreeItem from '@model/tree-item'
 import { makeCommandId } from '@lib/constants'
+import TreeItemKind from './tree-item-kind'
 export class TreeTagClearItem extends TreeItem {
-  kind: 'tag-clear' = 'tag-clear' as const
+  kind: TreeItemKind.TagClear = TreeItemKind.TagClear
   constructor() {
     super('Tüm Gruplar', vscode.TreeItemCollapsibleState.None)
     this.contextValue = 'tag.clear'

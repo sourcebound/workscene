@@ -1,8 +1,9 @@
 import * as vscode from 'vscode'
 import TreeItem from '@model/tree-item'
 import { makeCommandId } from '@lib/constants'
+import TreeItemKind from './tree-item-kind'
 export class TreeTagItem extends TreeItem {
-  kind: 'tag' = 'tag' as const
+  kind: TreeItemKind.Tag = TreeItemKind.Tag
   constructor(
     public readonly tag: string,
     public readonly count: number,

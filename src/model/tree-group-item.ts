@@ -1,11 +1,12 @@
 import * as vscode from 'vscode'
 import TreeItem from '@model/tree-item'
 import Group from '@type/group'
+import TreeItemKind from './tree-item-kind'
 export class TreeGroupItem extends TreeItem {
-  kind: 'group' = 'group' as const
+  kind: TreeItemKind.Group = TreeItemKind.Group
   constructor(
     public readonly group: Group,
-    iconPath?: vscode.ThemeIcon | vscode.Uri | { light: vscode.Uri; dark: vscode.Uri },
+    _iconPath?: vscode.ThemeIcon | vscode.Uri | { light: vscode.Uri; dark: vscode.Uri },
   ) {
     super(group.name, vscode.TreeItemCollapsibleState.Collapsed)
     this.contextValue = 'group'

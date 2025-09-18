@@ -1,4 +1,4 @@
-export const productIcons: string[] = [
+const icons: Readonly<readonly string[]> = [
   'account',
   'activate-breakpoints',
   'add',
@@ -518,3 +518,5 @@ export const productIcons: string[] = [
   'zoom-in',
   'zoom-out',
 ]
+
+export default icons

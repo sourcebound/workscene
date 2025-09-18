@@ -7,7 +7,7 @@ import Meta from '@type/meta'
  * sürüm/kök yol bilgilerinin güncel tutulmasından sorumludur.
  */
 
-/** Aktif workspace kökünden meta üretir. */
+/** Aktif workspace dizininden meta üretir. */
 export function getDefaultMeta(): Meta {
   const ws = vscode.workspace.workspaceFolders?.[0]
   const basePath = ws ? ws.uri.fsPath : ''

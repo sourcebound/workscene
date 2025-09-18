@@ -1,20 +1,23 @@
+import 'module-alias/register'
 import * as vscode from 'vscode'
 import { TextDecoder } from 'util'
-import Provider from './model/provider'
+import Provider from './model/extension-provider'
 import { CONFIG_FILE_BASENAME, VIEW_ID } from '@lib/constants'
 import State from '@type/state'
 import TreeItem from '@model/tree-item'
 import { TreeGroupItem } from '@model/tree-group-item'
 import { TreeFileItem } from '@model/tree-file-item'
 import { ensureStateWithMeta } from './util/normalize'
-import { makeCommandId, EXTENSION_ID, makeViewTitle } from '@lib/constants'
+import { makeCommandId, EXTENSION_ID } from '@lib/constants'
+import TreeItemKind from './model/tree-item-kind'
+import type { ExtensionContext } from 'vscode'
 
 /**
  *
  * @description Eklentinin giriş noktası. Modüler yapıya ayrılmış sınıf ve yardımcıları
  * buradan içe aktarılır, TreeView oluşturulur ve komutlar kaydedilir.
  */
-export function activate(context: vscode.ExtensionContext) {
+export function activate(context: ExtensionContext) {
   const provider = new Provider(context)
 
   const treeView = vscode.window.createTreeView(VIEW_ID, {
@@ -23,14 +26,18 @@ export function activate(context: vscode.ExtensionContext) {
     showCollapseAll: true,
     canSelectMany: true,
   })
-  ;(provider as any).attachView?.(treeView)
+  provider.attachView?.(treeView)
 
   // Focus key context for item kind (group/file) to support Enter=Rename behavior
   context.subscriptions.push(
     treeView.onDidChangeSelection(async (e) => {
       const sel = e.selection?.[0]
       const kind =
-        sel instanceof TreeGroupItem ? 'group' : sel instanceof TreeFileItem ? 'file' : undefined
+        sel instanceof TreeGroupItem
+          ? TreeItemKind.Group.toString()
+          : sel instanceof TreeFileItem
+            ? TreeItemKind.File.toString()
+            : undefined
       await vscode.commands.executeCommand('setContext', makeCommandId('focusedKind'), kind)
     }),
   )
@@ -42,13 +49,11 @@ export function activate(context: vscode.ExtensionContext) {
   )
 
   // Görünüm başlığını mevcut workspace adıyla güncelle
-  const updateTitle = () => {
-    const ws = vscode.workspace.workspaceFolders?.[0]
-    const projectName = ws?.name
-    treeView.title = makeViewTitle(projectName)
-  }
-  updateTitle()
-  context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(updateTitle))
+
+  provider.updateTitle(vscode.workspace.workspaceFolders)
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders((e) => provider.updateTitle(e.added)),
+  )
 
   context.subscriptions.push(
     vscode.commands.registerCommand(makeCommandId('addGroup'), () => {
@@ -136,7 +141,7 @@ export function activate(context: vscode.ExtensionContext) {
         provider.addExplorerResourcesToGroup(resource, selected),
     ),
     vscode.commands.registerCommand(makeCommandId('expandAll'), async () => {
-      const roots = (await provider.getChildren()) as any[]
+      const roots = await provider.getChildren()
       if (!roots || roots.length === 0) return
       let first = true
       for (const r of roots) {

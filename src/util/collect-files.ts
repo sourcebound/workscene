@@ -1,20 +1,17 @@
 import * as vscode from 'vscode'
 import * as path from 'path'
-/**
- * paths.ts
- *
- * Yol/URI dönüşümlerini tek bir yerde toplar. Amaç cross-platform tutarlılık
- * (Windows/Linux/Mac) ve konfig dosyasında göreli yolları korumaktır.
- */
 
-/** Yerel dosya yolunu POSIX formatına çevirir ("\\" → "/"). */
+/** @description Yerel dosya yolunu POSIX formatına çevirir ("\\" → "/"). */
 export function toPosix(p: string): string {
   return p.split(path.sep).join(path.posix.sep)
 }
 
 /**
- * Absolut dosya sistem yolunu, verilen köke göre göreli hale getirir.
+ * @description Absolut dosya sistem yolunu, verilen köke göre göreli hale getirir.
  * Köke sahip değilsek POSIX normalize edilmiş absolut döner.
+ * @param absFsPath Absolut dosya sistem yolu
+ * @param base Kök dizin
+ * @returns Göreli yol
  */
 export function toRelativeFromFsPath(absFsPath: string, base: string): string {
   if (!absFsPath) return ''
@@ -24,7 +21,10 @@ export function toRelativeFromFsPath(absFsPath: string, base: string): string {
 }
 
 /**
- * Göreli yol + kökten VS Code `Uri` üretir. Kök yoksa girdi mutlak kabul edilir.
+ * @description Göreli yol + kökten VS Code `Uri` üretir. Kök yoksa girdi mutlak kabul edilir.
+ * @param rel Göreli yol
+ * @param base Kök dizin
+ * @returns VS Code `Uri`
  */
 export function fromRelativeToUri(rel: string, base: string): vscode.Uri {
   const abs = base ? path.join(base, rel) : rel
@@ -32,7 +32,10 @@ export function fromRelativeToUri(rel: string, base: string): vscode.Uri {
 }
 
 /**
- * Verilen mutlak dosya yolundan workspace'e göre en üst klasör etiketini döndürür.
+ * @description Verilen mutlak dosya yolundan workspace'e göre en üst klasör etiketini döndürür.
+ * @param absPath Mutlak dosya yolu
+ * @param workspaceFolders Workspace dizinleri
+ * @returns En üst klasör etiketi
  */
 export function labelForTopFolder(
   absPath: string,
@@ -51,7 +54,12 @@ export function labelForTopFolder(
   return segs.length > 1 ? segs[0] : 'Root'
 }
 
-// --- File collection helpers (for adding folders) ---
+/**
+ * @description Dosya koleksiyonu (klasörler için)
+ * @param uri Dosya URI'si
+ * @param fs Dosya sistemi
+ * @returns Dosya URI'leri
+ */
 export async function collectFilesRecursively(
   uri: vscode.Uri,
   fs: Pick<vscode.FileSystem, 'readDirectory'> = vscode.workspace.fs,
@@ -70,6 +78,12 @@ export async function collectFilesRecursively(
   return collected
 }
 
+/**
+ * @description Dosya koleksiyonu (ilk seviye)
+ * @param uri Dosya URI'si
+ * @param fs Dosya sistemi
+ * @returns Dosya URI'leri
+ */
 export async function collectFilesFirstLevel(
   uri: vscode.Uri,
   fs: Pick<vscode.FileSystem, 'readDirectory'> = vscode.workspace.fs,

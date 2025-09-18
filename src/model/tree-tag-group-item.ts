@@ -1,7 +1,8 @@
 import * as vscode from 'vscode'
 import TreeItem from '@model/tree-item'
+import TreeItemKind from './tree-item-kind'
 export class TreeTagGroupItem extends TreeItem {
-  kind: 'tag-group' = 'tag-group' as const
+  kind: TreeItemKind.TagGroup = TreeItemKind.TagGroup
   constructor(
     public readonly tags: ReadonlyArray<{ tag: string; count: number }>,
     public readonly activeTag: string | undefined,

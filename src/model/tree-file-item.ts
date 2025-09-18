@@ -1,8 +1,9 @@
 import * as vscode from 'vscode'
 import TreeItem from '@model/tree-item'
 import FileEntry from '@type/file-entry'
+import TreeItemKind from './tree-item-kind'
 export class TreeFileItem extends TreeItem {
-  kind: 'file' = 'file' as const
+  kind: TreeItemKind.File = TreeItemKind.File
   constructor(
     public readonly uri: vscode.Uri,
     groupId: string,

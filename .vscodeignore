@@ -10,5 +10,4 @@
 !media/**
 !logo.png
 media/.DS_Store
-!node_modules/uuid/**
 **/.DS_Store

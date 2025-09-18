@@ -17,6 +17,13 @@
     "Other"
   ],
   "main": "./out/extension.js",
+  "_moduleAliases": {
+    "@": "out",
+    "@lib": "out/lib",
+    "@model": "out/model",
+    "@util": "out/util",
+    "@type": "out/type"
+  },
   "contributes": {
     "colors": [
       {
@@ -449,6 +456,7 @@
   },
   "dependencies": {
     "change-case": "^5.4.4",
+    "module-alias": "^2.2.3",
     "uuid": "^11.1.0"
   }
 }

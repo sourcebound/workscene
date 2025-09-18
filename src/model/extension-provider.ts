@@ -8,7 +8,7 @@ import Group from '@type/group'
 import TreeItem from '@model/tree-item'
 
 import FolderHandlingMode from '@type/folder-handling'
-import { CONFIG_FILE_BASENAME } from '@lib/constants'
+import { CONFIG_FILE_BASENAME, makeViewTitle } from '@lib/constants'
 import {
   collectFilesRecursively,
   collectFilesFirstLevel,
@@ -18,8 +18,8 @@ import {
   fromRelativeToUri,
 } from '@util/collect-files'
 
-import { productIcons } from '@lib/icon'
-import { twColorsHex } from '@lib/color'
+import icons from '@lib/icon'
+import colors from '@lib/color'
 import { TreeTagClearItem } from '@model/tree-tag-clear-item'
 import { TreeTagItem } from '@model/tree-tag-item'
 import { TreeGroupItem } from '@model/tree-group-item'
@@ -29,9 +29,10 @@ import { getDefaultMeta } from '@util/meta'
 import { getGroupChildrenItems } from '@util/helper'
 import { ensureStateWithMeta, normalizeTags } from '../util/normalize'
 import { makeCommandId } from '@lib/constants'
-class Provider
-  implements vscode.TreeDataProvider<TreeItem>, vscode.TreeDragAndDropController<TreeItem>
-{
+import { TreeDataProvider, TreeDragAndDropController } from 'vscode'
+import { createSaveToDiskOutputChannelMessage } from '@util/output-channel'
+
+class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<TreeItem> {
   readonly dropMimeTypes = ['application/vnd.code.tree.worksceneView', 'text/uri-list']
 
   readonly dragMimeTypes = ['application/vnd.code.tree.worksceneView']
@@ -176,7 +177,7 @@ class Provider
       this._lastSavedSignature = this.computeSignature(this._state)
       void this.updateCanSaveContext()
       const elapsed = Date.now() - started
-      this.out.appendLine(`[workscene] saveToDisk: ${elapsed}ms, size=${bytes.byteLength} bytes`)
+      this.out.appendLine(createSaveToDiskOutputChannelMessage(elapsed, bytes))
     }
   }
 
@@ -694,6 +695,12 @@ class Provider
     })
   }
 
+  updateTitle = (ws?: readonly vscode.WorkspaceFolder[]) => {
+    const projectName = ws?.[0]?.name
+    if (!this._view) return
+    this._view.title = makeViewTitle(projectName)
+  }
+
   async addFiles(target?: TreeGroupItem) {
     const group = target ?? (await this.pickGroup())
     if (!group) return
@@ -980,7 +987,6 @@ class Provider
     const targets = this.getGroupTargets(item)
     if (targets.length === 0) return
 
-    const icons = productIcons
     const items = [
       { label: 'Default (star)', id: '__default__' },
       { label: 'No Icon', id: '__none__' },
@@ -1026,7 +1032,7 @@ class Provider
     const items = [
       { label: 'Default', value: '__default__' },
       ...extra.map((v) => ({ label: v, value: v })),
-      ...twColorsHex,
+      ...colors,
       { label: 'Custom Hex…', value: '__custom_hex__' },
     ]
     const picked = await vscode.window.showQuickPick(items, {
