@@ -91,6 +91,8 @@ Kısayollar:
 ### Geliştirme
 - Derleme: `npm run compile`
 - İzleme: `npm run watch`
+- Test: `npm test`
+- Test (watch): `npm run test:watch`
 
 `vscode:prepublish` script’i yayın/paketleme sırasında otomatik derleme için ayarlı (kullanıyorsanız `vsce package` ile uyumludur).
 

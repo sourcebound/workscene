@@ -1,4 +1,3 @@
-import 'module-alias/register'
 import * as vscode from 'vscode'
 import { TextDecoder } from 'util'
 import Provider from './model/extension-provider'
