@@ -1,0 +1,7 @@
+node_modules
+out
+*.vsix
+package-lock.json
+
+# generated workspace config
+workscene.config.json

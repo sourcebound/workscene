@@ -1,4 +1,4 @@
-import FileEntry from "./file-entry"
+import FileEntry from './file-entry'
 interface Group {
   id: string
   name: string

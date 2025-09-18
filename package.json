@@ -428,11 +428,22 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "format": "prettier --write \"{src,*.{json,md}}\"",
+    "format:check": "prettier --check \"{src,*.{json,md}}\"",
+    "lint": "node ./node_modules/eslint/bin/eslint.js --ext .ts src",
+    "lint:fix": "node ./node_modules/eslint/bin/eslint.js --ext .ts src --fix"
   },
   "devDependencies": {
     "@types/node": "^20.19.14",
     "@types/vscode": "^1.84.0",
+    "@typescript-eslint/eslint-plugin": "^8.44.0",
+    "@typescript-eslint/parser": "^8.44.0",
+    "eslint": "^9.35.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "globals": "^16.4.0",
+    "prettier": "^3.6.2",
     "tslib": "^2.6.2",
     "typescript": "^5.6.2"
   },

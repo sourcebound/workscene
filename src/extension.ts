@@ -1,13 +1,13 @@
-import * as vscode from "vscode"
-import { TextDecoder } from "util"
-import Provider from "./model/provider"
-import { CONFIG_FILE_BASENAME, VIEW_ID } from "@lib/constants"
-import State from "@type/state"
-import TreeItem from "@model/tree-item"
-import { TreeGroupItem } from "@model/tree-group-item"
-import { TreeFileItem } from "@model/tree-file-item"
-import { ensureStateWithMeta } from "./util/normalize"
-import { makeCommandId, EXTENSION_ID, makeViewTitle } from "@lib/constants"
+import * as vscode from 'vscode'
+import { TextDecoder } from 'util'
+import Provider from './model/provider'
+import { CONFIG_FILE_BASENAME, VIEW_ID } from '@lib/constants'
+import State from '@type/state'
+import TreeItem from '@model/tree-item'
+import { TreeGroupItem } from '@model/tree-group-item'
+import { TreeFileItem } from '@model/tree-file-item'
+import { ensureStateWithMeta } from './util/normalize'
+import { makeCommandId, EXTENSION_ID, makeViewTitle } from '@lib/constants'
 
 /**
  *
@@ -29,15 +29,16 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     treeView.onDidChangeSelection(async (e) => {
       const sel = e.selection?.[0]
-      const kind = sel instanceof TreeGroupItem ? "group" : sel instanceof TreeFileItem ? "file" : undefined
-      await vscode.commands.executeCommand("setContext", makeCommandId("focusedKind"), kind)
-    })
+      const kind =
+        sel instanceof TreeGroupItem ? 'group' : sel instanceof TreeFileItem ? 'file' : undefined
+      await vscode.commands.executeCommand('setContext', makeCommandId('focusedKind'), kind)
+    }),
   )
   context.subscriptions.push(
     vscode.workspace.onDidCreateFiles(() => provider.refresh()),
     vscode.workspace.onDidDeleteFiles(() => provider.refresh()),
     vscode.workspace.onDidRenameFiles(() => provider.refresh()),
-    vscode.workspace.onDidSaveTextDocument(() => provider.refresh())
+    vscode.workspace.onDidSaveTextDocument(() => provider.refresh()),
   )
 
   // Görünüm başlığını mevcut workspace adıyla güncelle
@@ -47,170 +48,125 @@ export function activate(context: vscode.ExtensionContext) {
     treeView.title = makeViewTitle(projectName)
   }
   updateTitle()
-  context.subscriptions.push(
-    vscode.workspace.onDidChangeWorkspaceFolders(updateTitle)
-  )
+  context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(updateTitle))
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(makeCommandId("addGroup"), () => {
+    vscode.commands.registerCommand(makeCommandId('addGroup'), () => {
       const sel = treeView.selection?.[0]
       if (sel instanceof TreeGroupItem) return provider.addGroup(sel)
       return provider.addGroup()
     }),
-    vscode.commands.registerCommand(
-      makeCommandId("addSubGroup"),
-      (g: TreeGroupItem) => provider.addSubGroup(g)
+    vscode.commands.registerCommand(makeCommandId('addSubGroup'), (g: TreeGroupItem) =>
+      provider.addSubGroup(g),
     ),
-    vscode.commands.registerCommand(
-      makeCommandId("openAllInGroup"),
-      (g: TreeGroupItem) => provider.openAllInGroup(g)
+    vscode.commands.registerCommand(makeCommandId('openAllInGroup'), (g: TreeGroupItem) =>
+      provider.openAllInGroup(g),
     ),
-    vscode.commands.registerCommand(
-      makeCommandId("addOpenTabsToGroup"),
-      (g?: TreeGroupItem) => provider.addOpenTabsToGroup(g)
+    vscode.commands.registerCommand(makeCommandId('addOpenTabsToGroup'), (g?: TreeGroupItem) =>
+      provider.addOpenTabsToGroup(g),
     ),
-    vscode.commands.registerCommand(
-      makeCommandId("renameGroup"),
-      (g?: TreeGroupItem) => {
-        const target =
-          g ??
-          (treeView.selection?.[0] instanceof TreeGroupItem
-            ? (treeView.selection?.[0] as TreeGroupItem)
-            : undefined)
-        if (target) return provider.renameGroup(target)
-      }
+    vscode.commands.registerCommand(makeCommandId('renameGroup'), (g?: TreeGroupItem) => {
+      const target =
+        g ??
+        (treeView.selection?.[0] instanceof TreeGroupItem
+          ? (treeView.selection?.[0] as TreeGroupItem)
+          : undefined)
+      if (target) return provider.renameGroup(target)
+    }),
+    vscode.commands.registerCommand(makeCommandId('addFiles'), (g?: TreeGroupItem) =>
+      provider.addFiles(g),
     ),
-    vscode.commands.registerCommand(
-      makeCommandId("addFiles"),
-      (g?: TreeGroupItem) => provider.addFiles(g)
+    vscode.commands.registerCommand(makeCommandId('remove'), (it?: TreeItem) => {
+      const selection = treeView.selection ?? []
+      const fallback = selection.length ? (selection[0] as TreeItem) : undefined
+      return provider.remove(it ?? fallback)
+    }),
+    vscode.commands.registerCommand(makeCommandId('moveToGroup'), (it?: TreeFileItem) => {
+      const selection = treeView.selection ?? []
+      const fallback = selection.find((sel): sel is TreeFileItem => sel instanceof TreeFileItem)
+      return provider.moveToGroup(it ?? fallback)
+    }),
+    vscode.commands.registerCommand(makeCommandId('editFileMeta'), (it: TreeFileItem) =>
+      provider.editFileAliasDescription(it),
     ),
-    vscode.commands.registerCommand(
-      makeCommandId("remove"),
-      (it?: TreeItem) => {
-        const selection = treeView.selection ?? []
-        const fallback = selection.length ? (selection[0] as TreeItem) : undefined
-        return provider.remove(it ?? fallback)
-      }
+    vscode.commands.registerCommand(makeCommandId('sortGroup'), (g: TreeGroupItem) =>
+      provider.sortGroup(g),
     ),
-    vscode.commands.registerCommand(
-      makeCommandId("moveToGroup"),
-      (it?: TreeFileItem) => {
-        const selection = treeView.selection ?? []
-        const fallback = selection.find((sel): sel is TreeFileItem => sel instanceof TreeFileItem)
-        return provider.moveToGroup(it ?? fallback)
-      }
+    vscode.commands.registerCommand(makeCommandId('filterGroups'), () => provider.setGroupFilter()),
+    vscode.commands.registerCommand(makeCommandId('clearFilter'), () =>
+      provider.clearGroupFilter(),
     ),
-    vscode.commands.registerCommand(
-      makeCommandId("editFileMeta"),
-      (it: TreeFileItem) => provider.editFileAliasDescription(it)
+    vscode.commands.registerCommand(makeCommandId('changeGroupIcon'), (g?: TreeGroupItem) => {
+      const selection = treeView.selection ?? []
+      const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
+      return provider.changeGroupIcon(g ?? fallback)
+    }),
+    vscode.commands.registerCommand(makeCommandId('changeGroupColor'), (g?: TreeGroupItem) => {
+      const selection = treeView.selection ?? []
+      const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
+      return provider.changeGroupColor(g ?? fallback)
+    }),
+    vscode.commands.registerCommand(makeCommandId('editGroupTags'), (g?: TreeGroupItem) => {
+      const selection = treeView.selection ?? []
+      const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
+      const target = g ?? fallback
+      if (target) return provider.editGroupTags(target)
+    }),
+    vscode.commands.registerCommand(makeCommandId('export'), () => provider.exportGroupsToFile()),
+    vscode.commands.registerCommand(makeCommandId('import'), () => provider.importGroupsFromFile()),
+    vscode.commands.registerCommand(makeCommandId('undoCloseEditors'), () =>
+      provider.undoCloseEditors(),
     ),
-    vscode.commands.registerCommand(
-      makeCommandId("sortGroup"),
-      (g: TreeGroupItem) => provider.sortGroup(g)
-    ),
-    vscode.commands.registerCommand(
-      makeCommandId("filterGroups"),
-      () => provider.setGroupFilter()
-    ),
-    vscode.commands.registerCommand(
-      makeCommandId("clearFilter"),
-      () => provider.clearGroupFilter()
-    ),
-    vscode.commands.registerCommand(
-      makeCommandId("changeGroupIcon"),
-      (g?: TreeGroupItem) => {
-        const selection = treeView.selection ?? []
-        const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
-        return provider.changeGroupIcon(g ?? fallback)
-      }
-    ),
-    vscode.commands.registerCommand(
-      makeCommandId("changeGroupColor"),
-      (g?: TreeGroupItem) => {
-        const selection = treeView.selection ?? []
-        const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
-        return provider.changeGroupColor(g ?? fallback)
-      }
-    ),
-    vscode.commands.registerCommand(
-      makeCommandId("editGroupTags"),
-      (g?: TreeGroupItem) => {
-        const selection = treeView.selection ?? []
-        const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
-        const target = g ?? fallback
-        if (target) return provider.editGroupTags(target)
-      }
-    ),
-    vscode.commands.registerCommand(
-      makeCommandId("export"),
-      () => provider.exportGroupsToFile()
-    ),
-    vscode.commands.registerCommand(
-      makeCommandId("import"),
-      () => provider.importGroupsFromFile()
-    ),
-    vscode.commands.registerCommand(
-      makeCommandId("undoCloseEditors"),
-      () => provider.undoCloseEditors()
-    ),
-    vscode.commands.registerCommand(makeCommandId("saveNow"), async () => {
+    vscode.commands.registerCommand(makeCommandId('saveNow'), async () => {
       // UI'yi anında güncelle: menüden düşsün
-      await vscode.commands.executeCommand("setContext", makeCommandId("canSave"), false)
+      await vscode.commands.executeCommand('setContext', makeCommandId('canSave'), false)
       try {
         await provider.saveNow()
-      } catch (err) {
+      } catch {
         // Hata olursa yeniden etkinleştir ve bildir
-        await vscode.commands.executeCommand("setContext", makeCommandId("canSave"), true)
-        vscode.window.showErrorMessage("Kaydetme başarısız oldu.")
+        await vscode.commands.executeCommand('setContext', makeCommandId('canSave'), true)
+        vscode.window.showErrorMessage('Kaydetme başarısız oldu.')
       }
     }),
-    vscode.commands.registerCommand(makeCommandId("refresh"), () =>
-      provider.refresh()
-    ),
+    vscode.commands.registerCommand(makeCommandId('refresh'), () => provider.refresh()),
     // Explorer bağlam menüsü: seçilen öğeleri gruba ekle
     vscode.commands.registerCommand(
-      makeCommandId("addToGroupFromExplorer"),
+      makeCommandId('addToGroupFromExplorer'),
       (resource: vscode.Uri, selected?: vscode.Uri[]) =>
-        provider.addExplorerResourcesToGroup(resource, selected)
+        provider.addExplorerResourcesToGroup(resource, selected),
     ),
-    vscode.commands.registerCommand(
-      makeCommandId("expandAll"),
-      async () => {
-        const roots = (await provider.getChildren()) as any[]
-        if (!roots || roots.length === 0) return
-        let first = true
-        for (const r of roots) {
-          await treeView.reveal(r, { select: false, focus: first, expand: true })
-          first = false
-        }
+    vscode.commands.registerCommand(makeCommandId('expandAll'), async () => {
+      const roots = (await provider.getChildren()) as any[]
+      if (!roots || roots.length === 0) return
+      let first = true
+      for (const r of roots) {
+        await treeView.reveal(r, { select: false, focus: first, expand: true })
+        first = false
       }
+    }),
+    vscode.commands.registerCommand(makeCommandId('applyTagFilter'), (tag: string) =>
+      provider.applyTagFilter(tag),
     ),
-    vscode.commands.registerCommand(
-      makeCommandId("applyTagFilter"),
-      (tag: string) => provider.applyTagFilter(tag)
+    vscode.commands.registerCommand(makeCommandId('clearTagFilter'), () =>
+      provider.clearTagFilter(),
     ),
-    vscode.commands.registerCommand(
-      makeCommandId("clearTagFilter"),
-      () => provider.clearTagFilter()
-    )
   )
 
   // Inline accessory visibility (only affects inline buttons): add-subgroup, remove
   const applyActionVisibilityFromConfig = async () => {
     const cfg = vscode.workspace.getConfiguration(EXTENSION_ID)
     const ids = (
-      cfg.get<string[]>("itemAccessoryActionIds") ||
-      cfg.get<string[]>("itemAccesoryActionsIds") ||
-      ["add-subgroup", "remove"]
+      cfg.get<string[]>('itemAccessoryActionIds') ||
+      cfg.get<string[]>('itemAccesoryActionsIds') || ['add-subgroup', 'remove']
     )
-      .filter((s) => typeof s === "string")
+      .filter((s) => typeof s === 'string')
       .map((s) => s.trim().toLowerCase())
 
     const allow = new Set(ids)
     const set = (key: string, value: boolean) =>
-      vscode.commands.executeCommand("setContext", makeCommandId(`action.${key}`), value)
+      vscode.commands.executeCommand('setContext', makeCommandId(`action.${key}`), value)
 
-    const allKeys = ["add-subgroup", "remove"]
+    const allKeys = ['add-subgroup', 'remove']
     await Promise.all(allKeys.map((k) => set(k, false)))
     await Promise.all(Array.from(allow).map((k) => set(k, true)))
   }
@@ -218,31 +174,28 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (
-        e.affectsConfiguration(makeCommandId("itemAccessoryActionIds")) ||
-        e.affectsConfiguration(makeCommandId("itemAccesoryActionsIds"))
+        e.affectsConfiguration(makeCommandId('itemAccessoryActionIds')) ||
+        e.affectsConfiguration(makeCommandId('itemAccesoryActionsIds'))
       ) {
         void applyActionVisibilityFromConfig()
       }
-    })
+    }),
   )
 
   const ws = vscode.workspace.workspaceFolders?.[0]
   if (ws) {
     const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(ws, CONFIG_FILE_BASENAME)
+      new vscode.RelativePattern(ws, CONFIG_FILE_BASENAME),
     )
     let reloadTimer: ReturnType<typeof setTimeout> | undefined
     const reload = async () => {
-      const u = vscode.Uri.joinPath(
-        ws.uri,
-        CONFIG_FILE_BASENAME,
-      )
+      const u = vscode.Uri.joinPath(ws.uri, CONFIG_FILE_BASENAME)
       try {
         if ((provider as any)._isWriting) {
           return
         }
         const content = await vscode.workspace.fs.readFile(u)
-        const text = new TextDecoder("utf-8").decode(content)
+        const text = new TextDecoder('utf-8').decode(content)
         const parsed = JSON.parse(text) as Partial<State>
         ;(provider as any)._state = ensureStateWithMeta(parsed)
         provider.refresh()
@@ -264,7 +217,7 @@ export function activate(context: vscode.ExtensionContext) {
           groups: [],
         } as any)
         provider.refresh()
-      })
+      }),
     )
     void reload()
   }

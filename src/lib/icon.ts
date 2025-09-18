@@ -1,6 +1,4 @@
- 
-
-export const productIcons : string[] = [
+export const productIcons: string[] = [
   'account',
   'activate-breakpoints',
   'add',
