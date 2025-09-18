@@ -5,9 +5,14 @@
  * Bu sayede isimler tek kaynaktan yönetilir ve anlamları netleşir.
  */
 
-export const APP_NAME: string = 'Workscene'
+export const EXTENSION_NAME: string = 'Workscene'
 
-export const EXTENSION_ID: string = APP_NAME.toLowerCase()
+export const EXTENSION_ID: string = EXTENSION_NAME.toLowerCase()
+
+/**
+ * @description Görünüm kimliği (package.json → contributes.views.explorer[].id ile eşleşmeli)
+ */
+export const VIEW_ID: string = `${EXTENSION_ID}View`
 
 /**
  * @description Global Memento anahtarı (ileride ihtiyaç halinde)
@@ -22,14 +27,9 @@ export const CONFIG_FILE_EXTENSION: string = 'json'
 export const CONFIG_FILE_BASENAME: string = `${EXTENSION_ID}.config.${CONFIG_FILE_EXTENSION}`
 
 /**
- * @description Görünüm kimliği (package.json → contributes.views.explorer[].id ile eşleşmeli)
- */
-export const VIEW_ID: string = `${EXTENSION_ID}View`
-
-/**
  * @description Makes a unique identifier for the command
  */
 export const makeCommandId = (command: string): string => `${EXTENSION_ID}.${command}`
 
 export const makeViewTitle = (title?: string | undefined): string =>
-  title ? `${APP_NAME} (${title})` : APP_NAME
+  title ? `${EXTENSION_NAME} (${title})` : EXTENSION_NAME

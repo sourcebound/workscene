@@ -1,4 +1,4 @@
-const colors: readonly { label: string; value: string }[] = [
+const colors: Readonly<readonly { label: string; value: string }[]> = [
   { label: 'red-50', value: '#FEF2F2' },
   { label: 'red-100', value: '#FFE2E2' },
   { label: 'red-200', value: '#FFC9C9' },

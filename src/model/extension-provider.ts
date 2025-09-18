@@ -8,7 +8,13 @@ import Group from '@type/group'
 import TreeItem from '@model/tree-item'
 
 import FolderHandlingMode from '@type/folder-handling'
-import { CONFIG_FILE_BASENAME, makeViewTitle } from '@lib/constants'
+import {
+  CONFIG_FILE_BASENAME,
+  EXTENSION_ID,
+  EXTENSION_NAME,
+  VIEW_ID,
+  makeViewTitle,
+} from '@lib/constants'
 import {
   collectFilesRecursively,
   collectFilesFirstLevel,
@@ -33,9 +39,9 @@ import { TreeDataProvider, TreeDragAndDropController } from 'vscode'
 import { createSaveToDiskOutputChannelMessage } from '@util/output-channel'
 
 class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<TreeItem> {
-  readonly dropMimeTypes = ['application/vnd.code.tree.worksceneView', 'text/uri-list']
+  readonly dropMimeTypes = [`application/vnd.code.tree.${VIEW_ID}`, 'text/uri-list']
 
-  readonly dragMimeTypes = ['application/vnd.code.tree.worksceneView']
+  readonly dragMimeTypes = [`application/vnd.code.tree.${VIEW_ID}`]
 
   private _emitter = new vscode.EventEmitter<TreeItem | undefined | void>()
   readonly onDidChangeTreeData = this._emitter.event
@@ -54,7 +60,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
   private static encoder = new TextEncoder()
 
   constructor(private readonly ctx: vscode.ExtensionContext) {
-    this.out = vscode.window.createOutputChannel('Workscene')
+    this.out = vscode.window.createOutputChannel(EXTENSION_NAME)
     void this.init()
   }
 
@@ -463,15 +469,15 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     }
     const skippedFolders = entries.length - fileEntries.length
     const autoClose = vscode.workspace
-      .getConfiguration('workscene')
+      .getConfiguration(EXTENSION_ID)
       .get<boolean>('autoCloseOnOpenAll', false)
     if (autoClose) {
       this._recentlyClosed = this.getOpenEditorFilePaths()
-      await vscode.commands.executeCommand('setContext', 'workscene.canUndoClose', true)
+      await vscode.commands.executeCommand('setContext', makeCommandId('canUndoClose'), true)
       if (this._undoCloseTimeout) clearTimeout(this._undoCloseTimeout)
       this._undoCloseTimeout = setTimeout(async () => {
         this._recentlyClosed = null
-        await vscode.commands.executeCommand('setContext', 'workscene.canUndoClose', false)
+        await vscode.commands.executeCommand('setContext', makeCommandId('canUndoClose'), false)
       }, 5000)
       await vscode.commands.executeCommand('workbench.action.closeAllEditors')
     }
@@ -510,7 +516,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     }
     this._recentlyClosed = null
     if (this._undoCloseTimeout) clearTimeout(this._undoCloseTimeout)
-    await vscode.commands.executeCommand('setContext', 'workscene.canUndoClose', false)
+    await vscode.commands.executeCommand('setContext', makeCommandId('canUndoClose'), false)
     vscode.window.showInformationMessage('Kapatılan sekmeler geri yüklendi.')
   }
 
@@ -631,7 +637,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
         it instanceof TreeGroupItem || it instanceof TreeFileItem,
     )
     if (targets.length === 0) return
-    const cfg = vscode.workspace.getConfiguration('workscene')
+    const cfg = vscode.workspace.getConfiguration(EXTENSION_ID)
     const confirm = cfg.get<boolean>('confirmBeforeRemove', true)
     if (confirm) {
       let message: string
@@ -1062,7 +1068,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     const targets = this.getGroupTargets(item)
     if (targets.length === 0) return
     const extra = vscode.workspace
-      .getConfiguration('workscene')
+      .getConfiguration(EXTENSION_ID)
       .get<string[]>('extraColors', [])
       .filter((s) => typeof s === 'string' && s.trim().length > 0)
       .map((s) => s.trim())
@@ -1141,7 +1147,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
 
   /** Map hex to a custom theming color token via workbench.colorCustomizations */
   private async ensureThemeTokenForHex(hex: string): Promise<string | undefined> {
-    const tokenPool = Array.from({ length: 10 }, (_, i) => `workscene.color.custom${i + 1}`)
+    const tokenPool = Array.from({ length: 10 }, (_, i) => `${EXTENSION_ID}.color.custom${i + 1}`)
     const config = vscode.workspace.getConfiguration()
     const current = config.get<any>('workbench.colorCustomizations') || {}
     for (const t of tokenPool) {
@@ -1198,7 +1204,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     const defaultPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
     const uri = await vscode.window.showSaveDialog({
       defaultUri: defaultPath
-        ? vscode.Uri.file(path.join(defaultPath, 'workscene-export.json'))
+        ? vscode.Uri.file(path.join(defaultPath, `${EXTENSION_ID}-export.json`))
         : undefined,
       filters: { json: ['json'] },
       saveLabel: 'Export Groups',
@@ -1298,7 +1304,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     const payload = [...filePayload, ...groupPayload]
     if (payload.length > 0) {
       dataTransfer.set(
-        'application/vnd.code.tree.worksceneView',
+        `application/vnd.code.tree.${VIEW_ID}`,
         new vscode.DataTransferItem(JSON.stringify(payload)),
       )
     }
@@ -1310,7 +1316,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     }
     // 1) Önceliği dahili payload'a ver (ağaç içi taşıma). Bu sayede
     //    resourceUri nedeniyle gelen 'text/uri-list' iç sürükle-bırakları gölgelemez.
-    const internal = dataTransfer.get('application/vnd.code.tree.worksceneView')
+    const internal = dataTransfer.get(`application/vnd.code.tree.${VIEW_ID}`)
     if (internal && target) {
       try {
         const moved = JSON.parse(await internal.asString()) as Array<
