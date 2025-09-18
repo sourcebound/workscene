@@ -317,6 +317,12 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       const needle = this._groupFilter.toLowerCase()
       results = results.filter((g) => (g.name || '').toLowerCase().includes(needle))
     }
+    if (this._tagFilter) {
+      const pruned = results
+        .map((g) => this.pruneGroupForTagFilter(g, true))
+        .filter((g): g is Group => !!g)
+      return pruned
+    }
     return results
   }
 
@@ -338,11 +344,43 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
   }
 
   private groupMatchesTag(group: Group, tag: string): boolean {
-    if ((group.tags ?? []).some((t) => this.isSameTag(t, tag))) return true
+    if (this.groupHasTag(group, tag)) return true
     for (const child of group.children ?? []) {
       if (this.groupMatchesTag(child, tag)) return true
     }
     return false
+  }
+
+  private groupHasTag(group: Group, tag: string): boolean {
+    return (group.tags ?? []).some((t) => this.isSameTag(t, tag))
+  }
+
+  private pruneGroupForTagFilter(group: Group, isRoot = false): Group | undefined {
+    if (!this._tagFilter) return group
+    const tag = this._tagFilter
+    const directMatch = this.groupHasTag(group, tag)
+    const originalChildren = group.children ?? []
+    const prunedChildren = originalChildren
+      .map((c) => this.pruneGroupForTagFilter(c, false))
+      .filter((c): c is Group => !!c)
+
+    if (directMatch) {
+      if (prunedChildren.length === originalChildren.length) return group
+      return {
+        ...group,
+        children: prunedChildren.length ? prunedChildren : undefined,
+      }
+    }
+
+    if (prunedChildren.length > 0 || isRoot) {
+      return {
+        ...group,
+        files: [],
+        children: prunedChildren.length ? prunedChildren : undefined,
+      }
+    }
+
+    return undefined
   }
 
   private isSameTag(a: string, b: string | undefined): boolean {
