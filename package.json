@@ -2,6 +2,7 @@
   "name": "workscene",
   "displayName": "Workscene",
   "description": "Xcode-style logical groups without touching the filesystem. Drag from Explorer, persist in workscene.config.json.",
+  "keywords": ["virtual groups","folderless","explorer","xcode groups","project groups","virtual folders"],
   "version": "0.3.0",
   "license": "AGPL-3.0-only",
   "publisher": "sourcebound",
@@ -182,6 +183,11 @@
         "icon": "$(whole-word)"
       },
       {
+        "command": "workscene.editGroupMeta",
+        "title": "Grup Adı/Açıklama Düzenle",
+        "icon": "$(edit)"
+      },
+      {
         "command": "workscene.remove",
         "title": "Kaldır",
         "icon": "$(trashcan)"
@@ -192,8 +198,13 @@
       },
       {
         "command": "workscene.editFileMeta",
-        "title": "Dosya Takma Adı/Açıklama Düzenle",
+        "title": "Dosya Takma Adı/Açıklama/Etiketleri Düzenle",
         "icon": "$(edit)"
+      },
+      {
+        "command": "workscene.editFileTags",
+        "title": "Dosya Etiketlerini Düzenle...",
+        "icon": "$(tag)"
       },
       {
         "command": "workscene.refresh",
@@ -315,11 +326,16 @@
           "when": "view == worksceneView && viewItem == group",
           "group": "navigation@2"
         },
-        {
-          "command": "workscene.renameGroup",
-          "when": "view == worksceneView && viewItem == group",
-          "group": "navigation@3"
-        },
+      {
+        "command": "workscene.renameGroup",
+        "when": "view == worksceneView && viewItem == group",
+        "group": "navigation@3"
+      },
+      {
+        "command": "workscene.editGroupMeta",
+        "when": "view == worksceneView && viewItem == group",
+        "group": "navigation@3.5"
+      },
         {
           "command": "workscene.addOpenTabsToGroup",
           "when": "view == worksceneView && viewItem == group",
@@ -359,11 +375,16 @@
           "command": "workscene.moveToGroup",
           "when": "view == worksceneView && viewItem == file"
         },
-        {
-          "command": "workscene.editFileMeta",
-          "when": "view == worksceneView && viewItem == file",
-          "group": "inline@1"
-        },
+      {
+        "command": "workscene.editFileMeta",
+        "when": "view == worksceneView && viewItem == file",
+        "group": "navigation@1"
+      },
+      {
+        "command": "workscene.editFileTags",
+        "when": "view == worksceneView && viewItem == file",
+        "group": "navigation@1.1"
+      },
         {
           "command": "workscene.remove",
           "when": "view == worksceneView && viewItem == file"

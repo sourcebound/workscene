@@ -18,10 +18,23 @@ export class TreeGroupItem extends TreeItem {
       this.iconPath = new vscode.ThemeIcon(iconId, color)
     }
     const tags = Array.isArray(group.tags) ? group.tags : []
+    const descriptionParts: string[] = []
+    if (group.description && group.description.trim()) {
+      descriptionParts.push(group.description.trim())
+    }
     if (tags.length) {
-      this.description = tags.map((t) => `#${t}`).join(', ')
+      descriptionParts.push(tags.map((t) => `#${t}`).join(', '))
+    }
+    if (descriptionParts.length) {
+      this.description = descriptionParts.join(' • ')
       const tooltip = new vscode.MarkdownString(undefined, true)
-      tooltip.appendMarkdown(`**Etiketler:** ${tags.map((t) => `\`#${t}\``).join(' ')}`)
+      if (group.description && group.description.trim()) {
+        tooltip.appendMarkdown(`**Açıklama:** ${group.description.trim()}`)
+        if (tags.length) tooltip.appendMarkdown('\n\n')
+      }
+      if (tags.length) {
+        tooltip.appendMarkdown(`**Etiketler:** ${tags.map((t) => `\`#${t}\``).join(' ')}`)
+      }
       this.tooltip = tooltip
     }
   }

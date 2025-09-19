@@ -77,6 +77,12 @@ export function activate(context: ExtensionContext) {
           : undefined)
       if (target) return provider.renameGroup(target)
     }),
+    vscode.commands.registerCommand(makeCommandId('editGroupMeta'), (g?: TreeGroupItem) => {
+      const selection = treeView.selection ?? []
+      const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
+      const target = g ?? fallback
+      if (target) return provider.editGroupMeta(target)
+    }),
     vscode.commands.registerCommand(makeCommandId('addFiles'), (g?: TreeGroupItem) =>
       provider.addFiles(g),
     ),
@@ -92,6 +98,9 @@ export function activate(context: ExtensionContext) {
     }),
     vscode.commands.registerCommand(makeCommandId('editFileMeta'), (it: TreeFileItem) =>
       provider.editFileAliasDescription(it),
+    ),
+    vscode.commands.registerCommand(makeCommandId('editFileTags'), (it: TreeFileItem) =>
+      provider.editFileTags(it),
     ),
     vscode.commands.registerCommand(makeCommandId('sortGroup'), (g: TreeGroupItem) =>
       provider.sortGroup(g),

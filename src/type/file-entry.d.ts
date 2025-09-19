@@ -3,6 +3,7 @@ interface FileEntry {
   name?: string
   description?: string
   kind?: 'file' | 'folder'
+  tags?: string[]
 }
 
 export default FileEntry

@@ -42,13 +42,14 @@ export function normalizeEntry(input: string, base: string): string {
 /** FileEntry'i normalize eder (string ise rel'e sarar). */
 export function normalizeFileEntry(input: string | FileEntry, base: string): FileEntry {
   if (typeof input === 'string') {
-    return { rel: normalizeEntry(input, base), kind: 'file' }
+    return { rel: normalizeEntry(input, base), kind: 'file', tags: [] }
   }
   return {
     rel: normalizeEntry(input.rel, base),
     name: input.name,
     description: input.description,
     kind: input.kind ?? 'file',
+    tags: normalizeTags((input as any).tags ?? []),
   }
 }
 
@@ -76,6 +77,7 @@ export function normalizeGroup(g: Group, base: string): Group {
   return {
     id: g.id,
     name: g.name,
+    description: g.description,
     files: ((g.files as any[]) ?? []).map((f) => normalizeFileEntry(f as any, base)),
     children: (g.children ?? []).map((c) => normalizeGroup(c, base)),
     tags: normalizeTags((g as any).tags ?? []),

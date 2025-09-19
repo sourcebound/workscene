@@ -1,10 +1,17 @@
 import * as vscode from 'vscode'
 import TreeItem from '@model/tree-item'
 import TreeItemKind from './tree-item-kind'
+
+export interface TagStat {
+  tag: string
+  groupCount: number
+  fileCount: number
+}
+
 export class TreeTagGroupItem extends TreeItem {
   kind: TreeItemKind.TagGroup = TreeItemKind.TagGroup
   constructor(
-    public readonly tags: ReadonlyArray<{ tag: string; count: number }>,
+    public readonly tags: ReadonlyArray<TagStat>,
     public readonly activeTag: string | undefined,
   ) {
     super(
@@ -14,7 +21,7 @@ export class TreeTagGroupItem extends TreeItem {
         : vscode.TreeItemCollapsibleState.None,
     )
     this.contextValue = 'tagGroup'
-    this.iconPath = new vscode.ThemeIcon('tag')
+    this.iconPath = new vscode.ThemeIcon('primitive-dot')
     if (activeTag) {
       this.description = `#${activeTag}`
     } else if (tags.length) {

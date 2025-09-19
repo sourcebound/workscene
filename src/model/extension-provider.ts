@@ -5,6 +5,7 @@ import { TextDecoder, TextEncoder } from 'util'
 
 import State from '@type/state'
 import Group from '@type/group'
+import FileEntry from '@type/file-entry'
 import TreeItem from '@model/tree-item'
 
 import FolderHandlingMode from '@type/folder-handling'
@@ -30,7 +31,7 @@ import { TreeTagClearItem } from '@model/tree-tag-clear-item'
 import { TreeTagItem } from '@model/tree-tag-item'
 import { TreeGroupItem } from '@model/tree-group-item'
 import { TreeFileItem } from '@model/tree-file-item'
-import { TreeTagGroupItem } from '@model/tree-tag-group-item'
+import { TreeTagGroupItem, TagStat } from '@model/tree-tag-group-item'
 import { getDefaultMeta } from '@util/meta'
 import { getGroupChildrenItems } from '@util/helper'
 import { ensureStateWithMeta, normalizeTags } from '../util/normalize'
@@ -217,17 +218,16 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
         name: fe.name || '',
         description: fe.description || '',
         kind: fe.kind || 'file',
+        tags: (fe.tags ?? []).slice(),
       }))
-      files.sort((a, b) =>
-        (a.rel + '\u0000' + a.name + '\u0000' + a.description + '\u0000' + a.kind).localeCompare(
-          b.rel + '\u0000' + b.name + '\u0000' + b.description + '\u0000' + b.kind,
-        ),
-      )
+      files.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
       return {
         id: g.id,
         name: g.name,
+        description: g.description || '',
         iconId: g.iconId || '',
         colorName: g.colorName || '',
+        tags: (g.tags ?? []).slice(),
         files,
         children,
       }
@@ -279,7 +279,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       const items: TreeItem[] = []
       if (this._tagFilter) items.push(new TreeTagClearItem())
       for (const info of el.tags) {
-        items.push(new TreeTagItem(info.tag, info.count, this.isSameTag(info.tag, this._tagFilter)))
+        items.push(new TreeTagItem(info, this.isSameTag(info.tag, this._tagFilter)))
       }
       return items
     }
@@ -332,25 +332,47 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return results
   }
 
-  private getTagStats(): Array<{ tag: string; count: number }> {
-    const stats = new Map<string, { tag: string; count: number }>()
+  private getTagStats(): TagStat[] {
+    const stats = new Map<string, { tag: string; groupIds: Set<string>; fileCount: number }>()
+    const ensureEntry = (rawTag: string) => {
+      const trimmed = rawTag.trim()
+      if (!trimmed) return undefined
+      const key = trimmed.toLowerCase()
+      let entry = stats.get(key)
+      if (!entry) {
+        entry = { tag: trimmed, groupIds: new Set<string>(), fileCount: 0 }
+        stats.set(key, entry)
+      }
+      return entry
+    }
     const visit = (nodes: Group[]) => {
       for (const g of nodes) {
         for (const tag of g.tags ?? []) {
-          const key = tag.toLowerCase()
-          const existing = stats.get(key)
-          if (existing) existing.count += 1
-          else stats.set(key, { tag, count: 1 })
+          const entry = ensureEntry(tag)
+          if (entry) entry.groupIds.add(g.id)
+        }
+        for (const file of g.files ?? []) {
+          for (const tag of file.tags ?? []) {
+            const entry = ensureEntry(tag)
+            if (entry) entry.fileCount += 1
+          }
         }
         if (g.children?.length) visit(g.children)
       }
     }
     visit(this.state.groups)
-    return Array.from(stats.values()).sort((a, b) => a.tag.localeCompare(b.tag))
+    return Array.from(stats.values())
+      .map<TagStat>((entry) => ({
+        tag: entry.tag,
+        groupCount: entry.groupIds.size,
+        fileCount: entry.fileCount,
+      }))
+      .filter((entry) => entry.groupCount > 0 || entry.fileCount > 0)
+      .sort((a, b) => a.tag.localeCompare(b.tag))
   }
 
   private groupMatchesTag(group: Group, tag: string): boolean {
-    if (this.groupHasTag(group, tag)) return true
+    if (this.groupHasTag(group, tag) || this.groupHasFileWithTag(group, tag)) return true
     for (const child of group.children ?? []) {
       if (this.groupMatchesTag(child, tag)) return true
     }
@@ -361,10 +383,19 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return (group.tags ?? []).some((t) => this.isSameTag(t, tag))
   }
 
-  private pruneGroupForTagFilter(group: Group, isRoot = false): Group | undefined {
+  private groupHasFileWithTag(group: Group, tag: string): boolean {
+    return (group.files ?? []).some((f) => this.fileHasTag(f, tag))
+  }
+
+  private fileHasTag(file: FileEntry, tag: string): boolean {
+    return (file.tags ?? []).some((t) => this.isSameTag(t, tag))
+  }
+
+  private pruneGroupForTagFilter(group: Group, _isRoot = false): Group | undefined {
     if (!this._tagFilter) return group
     const tag = this._tagFilter
     const directMatch = this.groupHasTag(group, tag)
+    const matchingFiles = (group.files ?? []).filter((f) => this.fileHasTag(f, tag))
     const originalChildren = group.children ?? []
     const prunedChildren = originalChildren
       .map((c) => this.pruneGroupForTagFilter(c, false))
@@ -378,10 +409,10 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       }
     }
 
-    if (prunedChildren.length > 0 || isRoot) {
+    if (matchingFiles.length || prunedChildren.length > 0) {
       return {
         ...group,
-        files: [],
+        files: matchingFiles.length ? matchingFiles : [],
         children: prunedChildren.length ? prunedChildren : undefined,
       }
     }
@@ -607,6 +638,30 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       this.state = s
       this._emitter.fire(item)
     }
+  }
+
+  async editGroupMeta(item: TreeGroupItem): Promise<void> {
+    const s = this.state
+    const target = this.findGroupById(s.groups, item.group.id)?.group
+    if (!target) return
+    const name = await vscode.window.showInputBox({
+      prompt: 'Group name',
+      value: target.name,
+      valueSelection: [0, target.name.length],
+    })
+    if (name === undefined) return
+    const description = await vscode.window.showInputBox({
+      prompt: 'Description (optional)',
+      value: target.description ?? '',
+    })
+    if (description === undefined) return
+    const trimmedName = name.trim()
+    const trimmedDescription = description.trim()
+    if (trimmedName) target.name = trimmedName
+    const nextDescription = trimmedDescription ? trimmedDescription : undefined
+    target.description = nextDescription
+    this.state = s
+    this._emitter.fire(item)
   }
 
   async editGroupTags(item: TreeGroupItem): Promise<void> {
@@ -1279,10 +1334,35 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       value: fe.description ?? '',
     })
     if (description === undefined) return
-    fe.name = name || undefined
-    fe.description = description || undefined
+    const trimmedName = name.trim()
+    const trimmedDescription = description.trim()
+    fe.name = trimmedName ? trimmedName : undefined
+    fe.description = trimmedDescription ? trimmedDescription : undefined
     this.state = s
     this._emitter.fire(item)
+  }
+
+  async editFileTags(item: TreeFileItem): Promise<void> {
+    const s = this.state
+    const g = this.findGroupById(s.groups, item.groupId!)?.group
+    if (!g) return
+    const fe = g.files.find((x) => x.rel === item.entry.rel)
+    if (!fe) return
+    const value = await vscode.window.showInputBox({
+      prompt: 'File tags (comma separated)',
+      placeHolder: 'ör. helper, api',
+      value: (fe.tags ?? []).join(', '),
+    })
+    if (value === undefined) return
+    const parts = value
+      .split(',')
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0)
+    const normalized = normalizeTags(parts)
+    fe.tags = normalized.length ? normalized : undefined
+    this.state = s
+    this._emitter.fire(item)
+    void this.updateFilterContext()
   }
 
   // --- Drag & Drop ---
