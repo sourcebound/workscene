@@ -1,4 +1,4 @@
-const colors: Readonly<readonly { label: string; value: string }[]> = [
+const defaultPalette: Readonly<readonly { label: string; value: string }[]> = [
   { label: 'red-50', value: '#FEF2F2' },
   { label: 'red-100', value: '#FFE2E2' },
   { label: 'red-200', value: '#FFC9C9' },
@@ -243,6 +243,6 @@ const colors: Readonly<readonly { label: string; value: string }[]> = [
   { label: 'stone-950', value: '#0C0A09' },
   { label: 'black', value: '#000000' },
   { label: 'white', value: '#ffffff' },
-]
+] as const
 
-export default colors
+export default defaultPalette

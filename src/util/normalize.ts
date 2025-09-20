@@ -1,10 +1,11 @@
 import * as vscode from 'vscode'
 import * as path from 'path'
 import State from '@type/state'
-import { getDefaultMeta } from '@util/meta'
+import { getDefaultMeta } from '@/util/manifest'
 import { toRelativeFromFsPath, toPosix } from '@util/collect-files'
 import FileEntry from '@type/file-entry'
 import Group from '@type/group'
+
 /** Parçalı gelen state'i meta ve giriş normalize edilerek tamamlar. */
 export function ensureStateWithMeta(input: Partial<State> | undefined): State {
   const defaults = getDefaultMeta()

@@ -1,4 +1,4 @@
-import * as vscode from 'vscode'
+import { Uri } from 'vscode'
 import Group from '@type/group'
 import TreeItem from '@model/tree-item'
 import { TreeGroupItem } from '@model/tree-group-item'
@@ -9,7 +9,7 @@ import { fromRelativeToUri } from '@util/collect-files'
 export function getGroupChildrenItems(
   group: Group,
   basePath: string,
-  groupIconPath?: { light: vscode.Uri; dark: vscode.Uri },
+  groupIconPath?: { light: Uri; dark: Uri },
 ): TreeItem[] {
   const items: TreeItem[] = []
   for (const child of group.children ?? []) {

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode'
 import TreeItem from '@model/tree-item'
-import TreeItemKind from './tree-item-kind'
+import TreeItemKind from '../enumeration/tree-item-kind'
+import * as Message from '@lib/message'
 
 export interface TagStat {
   tag: string
@@ -15,7 +16,7 @@ export class TreeTagGroupItem extends TreeItem {
     public readonly activeTag: string | undefined,
   ) {
     super(
-      'Etiketler',
+      Message.Tag.sectionLabel(),
       tags.length > 0 || activeTag
         ? vscode.TreeItemCollapsibleState.Expanded
         : vscode.TreeItemCollapsibleState.None,

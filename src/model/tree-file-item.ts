@@ -1,7 +1,9 @@
 import * as vscode from 'vscode'
 import TreeItem from '@model/tree-item'
 import FileEntry from '@type/file-entry'
-import TreeItemKind from './tree-item-kind'
+import TreeItemKind from '../enumeration/tree-item-kind'
+import * as Message from '@lib/message'
+
 export class TreeFileItem extends TreeItem {
   kind: TreeItemKind.File = TreeItemKind.File
   constructor(
@@ -25,11 +27,15 @@ export class TreeFileItem extends TreeItem {
       this.description = parts.join(' • ')
       const tooltip = new vscode.MarkdownString(undefined, true)
       if (entry.description && entry.description.trim()) {
-        tooltip.appendMarkdown(`**Açıklama:** ${entry.description.trim()}`)
+        tooltip.appendMarkdown(
+          `${Message.Group.tooltipDescriptionLabel()} ${entry.description.trim()}`,
+        )
         if (tags.length) tooltip.appendMarkdown('\n\n')
       }
       if (tags.length) {
-        tooltip.appendMarkdown(`**Etiketler:** ${tags.map((t) => `\`#${t}\``).join(' ')}`)
+        tooltip.appendMarkdown(
+          `${Message.Group.tooltipTagsLabel()} ${tags.map((t) => `\`#${t}\``).join(' ')}`,
+        )
       }
       if (tooltip.value) this.tooltip = tooltip
     }
@@ -39,7 +45,7 @@ export class TreeFileItem extends TreeItem {
     } else {
       this.command = {
         command: 'vscode.open',
-        title: 'Open File',
+        title: Message.File.openCommandTitle(),
         arguments: [uri],
       }
     }

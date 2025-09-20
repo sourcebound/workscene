@@ -13,6 +13,7 @@ const buildOptions = {
   sourcemap: true,
   external: ['vscode'],
   tsconfig: 'tsconfig.json',
+  minify: true,
 }
 
 try {

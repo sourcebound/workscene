@@ -1,8 +1,9 @@
 import * as vscode from 'vscode'
 import TreeItem from '@model/tree-item'
-import { makeCommandId } from '@lib/constants'
-import TreeItemKind from './tree-item-kind'
+import { makeCommandId } from '@util/command-id'
+import TreeItemKind from '../enumeration/tree-item-kind'
 import type { TagStat } from './tree-tag-group-item'
+import * as Message from '@lib/message'
 
 export class TreeTagItem extends TreeItem {
   kind: TreeItemKind.Tag = TreeItemKind.Tag
@@ -18,15 +19,15 @@ export class TreeTagItem extends TreeItem {
     this.iconPath = new vscode.ThemeIcon('primitive-dot')
     this.command = {
       command: makeCommandId('applyTagFilter'),
-      title: 'Etikete Göre Filtrele',
+      title: Message.Tag.filterCommandTitle(),
       arguments: [stat.tag],
     }
     const summaryParts: string[] = []
-    if (stat.groupCount > 0) summaryParts.push(`${stat.groupCount} grup`)
-    if (stat.fileCount > 0) summaryParts.push(`${stat.fileCount} dosya`)
-    const summary = summaryParts.length ? summaryParts.join(', ') : 'Eşleşme yok'
+    if (stat.groupCount > 0) summaryParts.push(Message.Format.groupCount(stat.groupCount))
+    if (stat.fileCount > 0) summaryParts.push(Message.Format.fileCount(stat.fileCount))
+    const summary = summaryParts.length ? summaryParts.join(', ') : Message.Tag.summaryNone()
     this.tooltip = isActive
-      ? `#${stat.tag} etiketiyle filtreleniyor`
-      : `${summary} #${stat.tag} etiketiyle eşleşiyor`
+      ? Message.Tag.activeTooltip(stat.tag)
+      : Message.Tag.summaryTooltip(summary, stat.tag)
   }
 }

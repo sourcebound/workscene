@@ -1,9 +1,17 @@
 {
+  "extends": "./contributes.json",
   "name": "workscene",
   "displayName": "Workscene",
   "description": "Xcode-style logical groups without touching the filesystem. Drag from Explorer, persist in workscene.config.json.",
-  "keywords": ["virtual groups","folderless","explorer","xcode groups","project groups","virtual folders"],
-  "version": "0.3.0",
+  "keywords": [
+    "virtual groups",
+    "folderless",
+    "explorer",
+    "xcode groups",
+    "project groups",
+    "virtual folders"
+  ],
+  "version": "0.3.1",
   "license": "AGPL-3.0-only",
   "publisher": "sourcebound",
   "icon": "logo.png",
@@ -25,6 +33,7 @@
     "@util": "out/util",
     "@type": "out/type"
   },
+  "l10n": "./l10n",
   "contributes": {
     "colors": [
       {
@@ -326,16 +335,16 @@
           "when": "view == worksceneView && viewItem == group",
           "group": "navigation@2"
         },
-      {
-        "command": "workscene.renameGroup",
-        "when": "view == worksceneView && viewItem == group",
-        "group": "navigation@3"
-      },
-      {
-        "command": "workscene.editGroupMeta",
-        "when": "view == worksceneView && viewItem == group",
-        "group": "navigation@3.5"
-      },
+        {
+          "command": "workscene.renameGroup",
+          "when": "view == worksceneView && viewItem == group",
+          "group": "navigation@3"
+        },
+        {
+          "command": "workscene.editGroupMeta",
+          "when": "view == worksceneView && viewItem == group",
+          "group": "navigation@3.5"
+        },
         {
           "command": "workscene.addOpenTabsToGroup",
           "when": "view == worksceneView && viewItem == group",
@@ -375,16 +384,16 @@
           "command": "workscene.moveToGroup",
           "when": "view == worksceneView && viewItem == file"
         },
-      {
-        "command": "workscene.editFileMeta",
-        "when": "view == worksceneView && viewItem == file",
-        "group": "navigation@1"
-      },
-      {
-        "command": "workscene.editFileTags",
-        "when": "view == worksceneView && viewItem == file",
-        "group": "navigation@1.1"
-      },
+        {
+          "command": "workscene.editFileMeta",
+          "when": "view == worksceneView && viewItem == file",
+          "group": "navigation@1"
+        },
+        {
+          "command": "workscene.editFileTags",
+          "when": "view == worksceneView && viewItem == file",
+          "group": "navigation@1.1"
+        },
         {
           "command": "workscene.remove",
           "when": "view == worksceneView && viewItem == file"
@@ -461,6 +470,7 @@
     "format:check": "prettier --check \"{src,*.{json,md}}\"",
     "lint": "node ./node_modules/eslint/bin/eslint.js --ext .ts src",
     "lint:fix": "node ./node_modules/eslint/bin/eslint.js --ext .ts src --fix",
+    "l10n:extract": "vscode-l10n-dev export --outDir l10n \"src/**/*.ts\"",
     "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.config.ts",
     "test:watch": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --watch --config jest.config.ts"
   },
@@ -471,6 +481,7 @@
     "@types/vscode": "^1.84.0",
     "@typescript-eslint/eslint-plugin": "^8.44.0",
     "@typescript-eslint/parser": "^8.44.0",
+    "@vscode/l10n-dev": "^0.0.35",
     "esbuild": "^0.25.10",
     "esbuild-plugin-tsconfig-paths": "^1.0.1",
     "eslint": "^9.35.0",
@@ -486,8 +497,7 @@
     "typescript": "^5.6.2"
   },
   "dependencies": {
-    "case": "^1.6.3",
-    "change-case": "^5.4.4",
+    "@vscode/l10n": "^0.0.18",
     "module-alias": "^2.2.3",
     "uuid": "^11.1.0"
   }

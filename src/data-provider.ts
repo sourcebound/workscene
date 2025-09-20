@@ -1,5 +1,4 @@
 import * as path from 'path'
-import * as vscode from 'vscode'
 import { v4 as UUID } from 'uuid'
 import { TextDecoder, TextEncoder } from 'util'
 
@@ -8,14 +7,9 @@ import Group from '@type/group'
 import FileEntry from '@type/file-entry'
 import TreeItem from '@model/tree-item'
 
-import FolderHandlingMode from '@type/folder-handling'
-import {
-  CONFIG_FILE_BASENAME,
-  EXTENSION_ID,
-  EXTENSION_NAME,
-  VIEW_ID,
-  makeViewTitle,
-} from '@lib/constants'
+import FolderHandlingMode from '@/type/folder-handling'
+import { CONFIG_FILE_BASENAME, EXTENSION_ID, EXTENSION_NAME, VIEW_ID } from '@lib/constants'
+
 import {
   collectFilesRecursively,
   collectFilesFirstLevel,
@@ -25,55 +19,137 @@ import {
   fromRelativeToUri,
 } from '@util/collect-files'
 
-import icons from '@lib/icon'
-import colors from '@lib/color'
+import defaultPalette from '@/lib/palette'
 import { TreeTagClearItem } from '@model/tree-tag-clear-item'
 import { TreeTagItem } from '@model/tree-tag-item'
 import { TreeGroupItem } from '@model/tree-group-item'
 import { TreeFileItem } from '@model/tree-file-item'
 import { TreeTagGroupItem, TagStat } from '@model/tree-tag-group-item'
-import { getDefaultMeta } from '@util/meta'
+import { getDefaultMeta } from '@/util/manifest'
 import { getGroupChildrenItems } from '@util/helper'
-import { ensureStateWithMeta, normalizeTags } from '../util/normalize'
-import { makeCommandId } from '@lib/constants'
-import { TreeDataProvider, TreeDragAndDropController } from 'vscode'
-import { createSaveToDiskOutputChannelMessage } from '@util/output-channel'
+import { ensureStateWithMeta, normalizeTags } from '@util/normalize'
+import { makeCommandId } from '@util/command-id'
+import {
+  ExtensionContext,
+  OutputChannel,
+  TreeDataProvider,
+  TreeDragAndDropController,
+  Uri,
+  EventEmitter,
+  WorkspaceFolder,
+  FileType,
+  window as vscWindow,
+  workspace as vscWorkspace,
+  commands as vscCmds,
+  ProviderResult,
+  DataTransfer,
+  DataTransferItem,
+  ConfigurationTarget,
+  QuickPickItem,
+  TreeView,
+} from 'vscode'
+import * as Message from '@lib/message'
+import symbols from '@/lib/symbol'
 
-class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<TreeItem> {
+export default class DataProvider
+  implements TreeDataProvider<TreeItem>, TreeDragAndDropController<TreeItem>
+{
+  /**
+   * @description Dosya iç sürükle-bırak için mime type.
+   * */
   readonly dropMimeTypes = [`application/vnd.code.tree.${VIEW_ID}`, 'text/uri-list']
 
+  /**
+   * @description Drag mime types
+   * @description Dosya dış sürükle-bırak için mime type.
+   * */
   readonly dragMimeTypes = [`application/vnd.code.tree.${VIEW_ID}`]
 
-  private _emitter = new vscode.EventEmitter<TreeItem | undefined | void>()
+  private _emitter = new EventEmitter<TreeItem | undefined | void>()
+
+  /**
+   * @description TreeView'ın veri değiştiğinde event.
+   * */
   readonly onDidChangeTreeData = this._emitter.event
 
   private _state: State = ensureStateWithMeta({ groups: [] } as any)
+
+  /**
+   * @description State'i yüklenip yüklenmediğini kontrol eder.
+   * */
   private _loaded = false
+
+  /**
+   * @description Save timer.
+   * */
   private _saveTimer: ReturnType<typeof setTimeout> | undefined
+
+  /**
+   * @description UI context güncellemesini debounce ederek CPU yükünü azalt.
+   * */
   private _contextTimer: ReturnType<typeof setTimeout> | undefined
+
+  /**
+   * @description Writing flag.
+   * */
   private _isWriting = false
+
+  /**
+   * @description Son kaydedilen imza.
+   * */
   private _lastSavedSignature: string = ''
+
+  /**
+   * @description Grup filtresi.
+   * */
   private _groupFilter: string | undefined
+
+  /**
+   * @description Etiket filtresi.
+   * */
   private _tagFilter: string | undefined
+
+  /**
+   * @description Son kapanmış sekmeler.
+   * */
   private _recentlyClosed: string[] | null = null
+
+  /**
+   * @description Son kapanmış sekmeleri geri yükleme timeout.
+   * */
   private _undoCloseTimeout: ReturnType<typeof setTimeout> | undefined
-  private readonly out: vscode.OutputChannel
+
+  /**
+   * @description Output channel.
+   * */
+  private readonly out: OutputChannel
+
+  /**
+   * @description Text encoder.
+   * */
   private static encoder = new TextEncoder()
 
-  constructor(private readonly ctx: vscode.ExtensionContext) {
-    this.out = vscode.window.createOutputChannel(EXTENSION_NAME)
+  constructor(private readonly ctx: ExtensionContext) {
+    this.out = vscWindow.createOutputChannel(EXTENSION_NAME)
     void this.init()
   }
 
-  private _view: vscode.TreeView<TreeItem> | undefined
-  attachView(view: vscode.TreeView<TreeItem>) {
+  /**
+   * @description TreeView.
+   * */
+  private _view: TreeView<TreeItem> | undefined
+
+  /**
+   * @description TreeView'ı bağlar.
+   * */
+  attachView(view: TreeView<TreeItem>) {
     this._view = view
   }
 
   /**
-   * Resolve the effective selection for a command. If the view already has a
-   * selection, return that while ensuring the primary item is part of it.
-   */
+   * @description Seçili item'ları döndürür.
+   * @description Komut için etkili seçimi döndürür. Eğer view zaten bir seçim içeriyorsa, seçimi döndürürken birincil item'ın da dahil olmasını sağlar.
+   * */
   private getSelectedItems(primary?: TreeItem): TreeItem[] {
     const selection = this._view?.selection ?? []
     if (!selection.length && primary) return [primary]
@@ -84,6 +160,10 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return Array.from(set)
   }
 
+  /**
+   * @description Grup target'ları döndürür.
+   * @description Komut için etkili seçimi döndürür. Eğer view zaten bir seçim içeriyorsa, seçimi döndürürken birincil item'ın da dahil olmasını sağlar.
+   * */
   private getGroupTargets(primary?: TreeGroupItem): TreeGroupItem[] {
     const selected = this.getSelectedItems(primary)
     const groups = selected.filter((it): it is TreeGroupItem => it instanceof TreeGroupItem)
@@ -93,6 +173,10 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return groups
   }
 
+  /**
+   * @description Dosya target'ları döndürür.
+   * @description Komut için etkili seçimi döndürür. Eğer view zaten bir seçim içeriyorsa, seçimi döndürürken birincil item'ın da dahil olmasını sağlar.
+   * */
   private getFileTargets(primary?: TreeFileItem): TreeFileItem[] {
     const selected = this.getSelectedItems(primary)
     const files = selected.filter((it): it is TreeFileItem => it instanceof TreeFileItem)
@@ -102,11 +186,14 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return files
   }
 
+  /**
+   * @description Başlatma işlemi.
+   * */
   private async init(): Promise<void> {
     const u = this.configUri
     if (u) {
       try {
-        const content = await vscode.workspace.fs.readFile(u)
+        const content = await vscWorkspace.fs.readFile(u)
         const text = new TextDecoder('utf-8').decode(content)
         const parsed = JSON.parse(text) as Partial<State>
         this._state = ensureStateWithMeta(parsed)
@@ -115,15 +202,22 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       }
     }
     this._lastSavedSignature = this.computeSignature(this._state)
-    void vscode.commands.executeCommand('setContext', makeCommandId('canSave'), false)
+    void vscCmds.executeCommand('setContext', makeCommandId('canSave'), false)
     this._loaded = true
     this.refresh()
     void this.updateFilterContext()
   }
 
+  /**
+   * @description State'i döndürür.
+   * */
   private get state(): State {
     return this._state
   }
+
+  /**
+   * @description State'i ayarlar.
+   * */
   private set state(v: State) {
     const basePath = getDefaultMeta().basePath
     const now = new Date().toISOString()
@@ -142,12 +236,18 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     this.scheduleCanSaveContextUpdate()
   }
 
-  private get configUri(): vscode.Uri | undefined {
-    const ws = vscode.workspace.workspaceFolders?.[0]
+  /**
+   * @description Config URI'yi döndürür.
+   * */
+  private get configUri(): Uri | undefined {
+    const ws = vscWorkspace.workspaceFolders?.[0]
     if (!ws) return undefined
-    return vscode.Uri.joinPath(ws.uri, CONFIG_FILE_BASENAME)
+    return Uri.joinPath(ws.uri, CONFIG_FILE_BASENAME)
   }
 
+  /**
+   * @description Kaydetme işlemi.
+   * */
   private scheduleSave(): void {
     if (!this._loaded) return
     if (this._saveTimer) clearTimeout(this._saveTimer)
@@ -156,6 +256,9 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     }, 200)
   }
 
+  /**
+   * @description Konfigürasyonu diskte kaydet
+   * */
   private async saveToDisk(): Promise<void> {
     const u = this.configUri
     if (!u) return
@@ -167,13 +270,13 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
         updatedAt: new Date().toISOString(),
       },
     }
-    const bytes = Provider.encoder.encode(JSON.stringify(toWrite, null, 2))
+    const bytes = DataProvider.encoder.encode(JSON.stringify(toWrite, null, 2))
     try {
       this._isWriting = true
-      await vscode.workspace.fs.writeFile(u, bytes)
+      await vscWorkspace.fs.writeFile(u, bytes)
     } catch {
       try {
-        await vscode.workspace.fs.writeFile(u, bytes)
+        await vscWorkspace.fs.writeFile(u, bytes)
       } catch {
         /* yut */
       }
@@ -184,11 +287,11 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       this._lastSavedSignature = this.computeSignature(this._state)
       void this.updateCanSaveContext()
       const elapsed = Date.now() - started
-      this.out.appendLine(createSaveToDiskOutputChannelMessage(elapsed, bytes))
+      this.out.appendLine(Message.Info.createSaveToDiskOutputChannelMessage(elapsed, bytes))
     }
   }
 
-  /** Manuel kaydet: bekleyen yazmayı iptal et, değişiklik yoksa yazma */
+  /** @description Manuel kaydet: bekleyen yazmayı iptal et, değişiklik yoksa yazma */
   async saveNow(): Promise<void> {
     if (this._saveTimer) {
       clearTimeout(this._saveTimer)
@@ -202,13 +305,13 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     await this.saveToDisk()
   }
 
-  /** Dışarıdan yükleme sonrası imzayı senkronize eder */
+  /** @description Dışarıdan yükleme sonrası imzayı senkronize eder */
   syncSavedSignatureWithState(): void {
     this._lastSavedSignature = this.computeSignature(this._state)
     void this.updateCanSaveContext()
   }
 
-  /** Yalnızca anlamlı alanlardan deterministik imza üretir (timestamp hariç) */
+  /** @description Yalnızca anlamlı alanlardan deterministik imza üretir (timestamp hariç) */
   private computeSignature(state: State): string {
     const simplifyGroup = (g: Group): any => {
       const children = (g.children ?? []).map(simplifyGroup)
@@ -242,7 +345,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return JSON.stringify(simplified)
   }
 
-  /** UI context güncellemesini debounce ederek CPU yükünü azalt */
+  /** @description UI context güncellemesini debounce ederek CPU yükünü azalt */
   private scheduleCanSaveContextUpdate(): void {
     if (this._contextTimer) clearTimeout(this._contextTimer)
     this._contextTimer = setTimeout(() => {
@@ -250,20 +353,25 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     }, 150)
   }
 
+  /** @description UI context güncellemesini debounce ederek CPU yükünü azalt */
   private async updateCanSaveContext(): Promise<void> {
     const current = this.computeSignature(this._state)
     const canSave = current !== this._lastSavedSignature
-    await vscode.commands.executeCommand('setContext', makeCommandId('canSave'), canSave)
+    await vscCmds.executeCommand('setContext', makeCommandId('canSave'), canSave)
   }
 
+  /** @description TreeView'ı yeniden yükler */
   refresh() {
     this._emitter.fire()
   }
+
+  /** @description TreeView'ın item'ını döndürür */
   getTreeItem(el: TreeItem) {
     return el
   }
 
-  getChildren(el?: TreeItem): vscode.ProviderResult<TreeItem[]> {
+  /** @description TreeView'ın child'larını döndürür */
+  getChildren(el?: TreeItem): ProviderResult<TreeItem[]> {
     const s = this.state
     if (!el) {
       const items: TreeItem[] = []
@@ -290,7 +398,8 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return []
   }
 
-  getParent(el: TreeItem): vscode.ProviderResult<TreeItem> {
+  /** @description TreeView'ın parent'ını döndürür */
+  getParent(el: TreeItem): ProviderResult<TreeItem> {
     const s = this.state
     if (el instanceof TreeTagItem || el instanceof TreeTagClearItem) {
       return this.buildTagGroupItem() ?? null
@@ -308,12 +417,14 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return null
   }
 
+  /** @description Tag grup item'ını döndürür */
   private buildTagGroupItem(): TreeTagGroupItem | undefined {
     const stats = this.getTagStats()
     if (!stats.length && !this._tagFilter) return undefined
     return new TreeTagGroupItem(stats, this._tagFilter)
   }
 
+  /** @description Filtered root groups'ı döndürür */
   private getFilteredRootGroups(groups: Group[]): Group[] {
     let results = groups
     if (this._tagFilter) {
@@ -332,6 +443,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return results
   }
 
+  /** @description Tag istatistiklerini döndürür */
   private getTagStats(): TagStat[] {
     const stats = new Map<string, { tag: string; groupIds: Set<string>; fileCount: number }>()
     const ensureEntry = (rawTag: string) => {
@@ -371,6 +483,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       .sort((a, b) => a.tag.localeCompare(b.tag))
   }
 
+  /** @description Grup etiketine göre eşleşmeyi kontrol eder */
   private groupMatchesTag(group: Group, tag: string): boolean {
     if (this.groupHasTag(group, tag) || this.groupHasFileWithTag(group, tag)) return true
     for (const child of group.children ?? []) {
@@ -379,18 +492,22 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return false
   }
 
+  /** @description Grup etiketine göre eşleşmeyi kontrol eder */
   private groupHasTag(group: Group, tag: string): boolean {
     return (group.tags ?? []).some((t) => this.isSameTag(t, tag))
   }
 
+  /** @description Grup dosyası etiketine göre eşleşmeyi kontrol eder */
   private groupHasFileWithTag(group: Group, tag: string): boolean {
     return (group.files ?? []).some((f) => this.fileHasTag(f, tag))
   }
 
+  /** @description Dosya etiketine göre eşleşmeyi kontrol eder */
   private fileHasTag(file: FileEntry, tag: string): boolean {
     return (file.tags ?? []).some((t) => this.isSameTag(t, tag))
   }
 
+  /** @description Grup etiketine göre filtreleme yapar */
   private pruneGroupForTagFilter(group: Group, _isRoot = false): Group | undefined {
     if (!this._tagFilter) return group
     const tag = this._tagFilter
@@ -420,16 +537,17 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return undefined
   }
 
+  /** @description Etiketlerin eşleşip eşleşmediğini kontrol eder */
   private isSameTag(a: string, b: string | undefined): boolean {
     if (!b) return false
     return a.trim().toLowerCase() === b.trim().toLowerCase()
   }
 
-  /** Aktif editör sekmelerindeki tüm dosyaları belirtilen gruba ekler veya seçim ister */
+  /** @description Aktif editör sekmelerindeki tüm dosyaları belirtilen gruba ekler veya seçim ister */
   async addOpenTabsToGroup(target?: TreeGroupItem): Promise<void> {
     const filePaths = this.getOpenEditorFilePaths()
     if (filePaths.length === 0) {
-      vscode.window.showInformationMessage('Açık dosya sekmesi bulunamadı.')
+      vscWindow.showInformationMessage(Message.Info.noOpenTabs())
       return
     }
     const s = this.state
@@ -442,20 +560,20 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     } else {
       // Grup seçimi veya yeni grup oluşturma
       const items = [
-        { label: '$(new-folder) Yeni Grup...', id: '__new__' },
+        { label: Message.Label.quickPickNewGroup(), id: '__new__' },
         ...this.flattenGroups(s.groups).map((g) => ({
           label: g.pathLabel,
           id: g.id,
         })),
       ]
-      const picked = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Sekmeleri eklenecek grubu seçin',
+      const picked = await vscWindow.showQuickPick(items, {
+        placeHolder: Message.Placeholder.selectGroupForTabs(),
       })
       if (!picked) return
       if (picked.id === '__new__') {
         const suggested = this.suggestGroupName(s.groups)
-        const name = await vscode.window.showInputBox({
-          prompt: 'Yeni grup adı',
+        const name = await vscWindow.showInputBox({
+          prompt: Message.Prompt.newGroupName(),
           value: suggested,
         })
         if (name === undefined) return
@@ -485,40 +603,40 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       this.state = s
       this._emitter.fire(target)
     }
-    vscode.window.showInformationMessage(`${group.name} grubuna ${added} sekme eklendi.`)
+    vscWindow.showInformationMessage(Message.Info.addTabsToGroup(group.name, added))
   }
 
-  /** Bir gruptaki tüm dosyaları editörde açar (varsa mevcut sekmeyi öne çıkarır) */
+  /** @description Bir gruptaki tüm dosyaları editörde açar (varsa mevcut sekmeyi öne çıkarır) */
   async openAllInGroup(item: TreeGroupItem): Promise<void> {
     const s = this.state
     const base = s.meta.basePath
     const entries = item.group.files ?? []
     const fileEntries = entries.filter((fe) => (fe.kind ?? 'file') !== 'folder')
     if (fileEntries.length === 0) {
-      vscode.window.showInformationMessage('Bu grupta açılacak dosya yok.')
+      vscWindow.showInformationMessage(Message.Info.noFilesToOpenInGroup())
       return
     }
     const skippedFolders = entries.length - fileEntries.length
-    const autoClose = vscode.workspace
+    const autoClose = vscWorkspace
       .getConfiguration(EXTENSION_ID)
       .get<boolean>('autoCloseOnOpenAll', false)
     if (autoClose) {
       this._recentlyClosed = this.getOpenEditorFilePaths()
-      await vscode.commands.executeCommand('setContext', makeCommandId('canUndoClose'), true)
+      await vscCmds.executeCommand('setContext', makeCommandId('canUndoClose'), true)
       if (this._undoCloseTimeout) clearTimeout(this._undoCloseTimeout)
       this._undoCloseTimeout = setTimeout(async () => {
         this._recentlyClosed = null
-        await vscode.commands.executeCommand('setContext', makeCommandId('canUndoClose'), false)
+        await vscCmds.executeCommand('setContext', makeCommandId('canUndoClose'), false)
       }, 5000)
-      await vscode.commands.executeCommand('workbench.action.closeAllEditors')
+      await vscCmds.executeCommand('workbench.action.closeAllEditors')
     }
     for (let i = 0; i < fileEntries.length; i++) {
       const fe = fileEntries[i]
       const uri = fromRelativeToUri(fe.rel, base)
       try {
         if (await this.revealExistingTab(uri)) continue
-        const doc = await vscode.workspace.openTextDocument(uri)
-        await vscode.window.showTextDocument(doc, {
+        const doc = await vscWorkspace.openTextDocument(uri)
+        await vscWindow.showTextDocument(doc, {
           preview: false,
           preserveFocus: i !== 0,
         })
@@ -527,40 +645,39 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       }
     }
     if (skippedFolders > 0) {
-      vscode.window.showInformationMessage(
-        `${skippedFolders} klasör atlandı. Bu komut yalnızca dosyaları açar.`,
-      )
+      vscWindow.showInformationMessage(Message.Info.skippedFolders(skippedFolders))
     }
   }
 
+  /** @description Kapatılan sekmeleri geri yükler */
   async undoCloseEditors(): Promise<void> {
     if (!this._recentlyClosed || this._recentlyClosed.length === 0) return
     for (const p of this._recentlyClosed) {
       try {
-        const uri = vscode.Uri.file(p)
+        const uri = Uri.file(p)
         if (await this.revealExistingTab(uri)) continue
-        const doc = await vscode.workspace.openTextDocument(uri)
-        await vscode.window.showTextDocument(doc, { preview: false })
+        const doc = await vscWorkspace.openTextDocument(uri)
+        await vscWindow.showTextDocument(doc, { preview: false })
       } catch {
         /* yut */
       }
     }
     this._recentlyClosed = null
     if (this._undoCloseTimeout) clearTimeout(this._undoCloseTimeout)
-    await vscode.commands.executeCommand('setContext', makeCommandId('canUndoClose'), false)
-    vscode.window.showInformationMessage('Kapatılan sekmeler geri yüklendi.')
+    await vscCmds.executeCommand('setContext', makeCommandId('canUndoClose'), false)
+    vscWindow.showInformationMessage(Message.Info.closedTabsRestored())
   }
 
-  /** Açık sekmeler arasında verilen URI'yi bulup ilgili grupta öne çıkarır */
-  private async revealExistingTab(uri: vscode.Uri): Promise<boolean> {
-    for (const group of vscode.window.tabGroups.all) {
+  /** @description Açık sekmeler arasında verilen URI'yi bulup ilgili grupta öne çıkarır */
+  private async revealExistingTab(uri: Uri): Promise<boolean> {
+    for (const group of vscWindow.tabGroups.all) {
       for (const tab of group.tabs) {
         const input: any = (tab as any).input
         if (!input || typeof input !== 'object' || !('uri' in input)) continue
         const tabUri = input.uri
-        if (tabUri instanceof vscode.Uri && tabUri.fsPath === uri.fsPath) {
-          const document = await vscode.workspace.openTextDocument(uri)
-          await vscode.window.showTextDocument(document, {
+        if (tabUri instanceof Uri && tabUri.fsPath === uri.fsPath) {
+          const document = await vscWorkspace.openTextDocument(uri)
+          await vscWindow.showTextDocument(document, {
             viewColumn: group.viewColumn,
             preview: false,
           })
@@ -571,15 +688,15 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return false
   }
 
-  /** Aktif editor gruplarındaki tüm açık dosya yollarını toplar (file:// olanlar) */
+  /** @description Aktif editor gruplarındaki tüm açık dosya yollarını toplar (file:// olanlar) */
   private getOpenEditorFilePaths(): string[] {
-    const allTabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs)
+    const allTabs = vscWindow.tabGroups.all.flatMap((g) => g.tabs)
     const out: string[] = []
     for (const tab of allTabs) {
       const input: any = (tab as any).input
       if (input && typeof input === 'object' && 'uri' in input) {
         const uri: any = input.uri
-        if (uri instanceof vscode.Uri && uri.scheme === 'file') {
+        if (uri instanceof Uri && uri.scheme === 'file') {
           out.push(uri.fsPath)
         }
       }
@@ -587,14 +704,15 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return out
   }
 
+  /** @description Grup ekleme */
   async addGroup(target?: TreeGroupItem) {
     const s = this.state
     const siblings = target
       ? (this.findGroupById(s.groups, target.group.id)?.group.children ?? [])
       : s.groups
     const suggested = this.suggestGroupName(siblings)
-    const name = await vscode.window.showInputBox({
-      prompt: 'Group name',
+    const name = await vscWindow.showInputBox({
+      prompt: Message.Prompt.groupName(),
       value: suggested,
     })
     if (name === undefined) return
@@ -620,13 +738,15 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     }, 0)
   }
 
+  /** @description Alt grup ekleme */
   async addSubGroup(target: TreeGroupItem) {
     return this.addGroup(target)
   }
 
+  /** @description Grup adını değiştirme */
   async renameGroup(item: TreeGroupItem) {
-    const name = await vscode.window.showInputBox({
-      prompt: 'New name',
+    const name = await vscWindow.showInputBox({
+      prompt: Message.Prompt.renameGroup(),
       value: item.group.name,
       valueSelection: [0, item.group.name.length],
     })
@@ -640,18 +760,19 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     }
   }
 
+  /** @description Grup meta verilerini düzenleme */
   async editGroupMeta(item: TreeGroupItem): Promise<void> {
     const s = this.state
     const target = this.findGroupById(s.groups, item.group.id)?.group
     if (!target) return
-    const name = await vscode.window.showInputBox({
-      prompt: 'Group name',
+    const name = await vscWindow.showInputBox({
+      prompt: Message.Prompt.groupName(),
       value: target.name,
       valueSelection: [0, target.name.length],
     })
     if (name === undefined) return
-    const description = await vscode.window.showInputBox({
-      prompt: 'Description (optional)',
+    const description = await vscWindow.showInputBox({
+      prompt: Message.Prompt.descriptionOptional(),
       value: target.description ?? '',
     })
     if (description === undefined) return
@@ -669,9 +790,9 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     const target = this.findGroupById(s.groups, item.group.id)?.group
     if (!target) return
     const current = target.tags ?? []
-    const value = await vscode.window.showInputBox({
-      prompt: 'Group tags (comma separated)',
-      placeHolder: 'ör. ui, onboarding',
+    const value = await vscWindow.showInputBox({
+      prompt: Message.Prompt.groupTags(),
+      placeHolder: Message.Placeholder.groupTags(),
       value: current.join(', '),
     })
     if (value === undefined) return
@@ -686,13 +807,14 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     void this.updateFilterContext()
   }
 
+  /** @description Grup veya dosya kaldırma */
   async remove(item?: TreeItem) {
     const targets = this.getSelectedItems(item).filter(
       (it): it is TreeGroupItem | TreeFileItem =>
         it instanceof TreeGroupItem || it instanceof TreeFileItem,
     )
     if (targets.length === 0) return
-    const cfg = vscode.workspace.getConfiguration(EXTENSION_ID)
+    const cfg = vscWorkspace.getConfiguration(EXTENSION_ID)
     const confirm = cfg.get<boolean>('confirmBeforeRemove', true)
     if (confirm) {
       let message: string
@@ -700,27 +822,27 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
         const single = targets[0]
         if (single instanceof TreeGroupItem) {
           const name = single.group.name
-          message = `'${name}' grubu ve alt öğeleri kaldırılacak. Devam edilsin mi?`
+          message = Message.Warning.confirmRemoveGroup(name)
         } else {
           const name = single.entry.name || single.entry.rel
-          message = `'${name}' gruptan kaldırılacak. Devam edilsin mi?`
+          message = Message.Warning.confirmRemoveFile(name)
         }
       } else {
         const groupCount = targets.filter((t) => t instanceof TreeGroupItem).length
         const itemCount = targets.filter((t) => t instanceof TreeFileItem).length
         const parts = [] as string[]
-        if (groupCount) parts.push(`${groupCount} grup`)
-        if (itemCount) parts.push(`${itemCount} öğe`)
-        const summary = parts.join(', ') || `${targets.length} öğe`
-        message = `Seçili ${summary} kaldırılacak. Devam edilsin mi?`
+        if (groupCount) parts.push(Message.Format.groupCount(groupCount))
+        if (itemCount) parts.push(Message.Format.itemCount(itemCount))
+        const summary = parts.join(', ') || Message.Format.itemCount(targets.length)
+        message = Message.Warning.confirmRemoveMultiple(summary)
       }
-      const picked = await vscode.window.showWarningMessage(
+      const picked = await vscWindow.showWarningMessage(
         message,
         { modal: true },
-        'Kaldır',
-        'İptal',
+        Message.Button.remove(),
+        Message.Button.cancel(),
       )
-      if (picked !== 'Kaldır') return
+      if (picked !== Message.Button.remove()) return
     }
     const s = this.state
     let changed = false
@@ -756,24 +878,25 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     this.state = s
     this._emitter.fire()
     if (targets.length > 1) {
-      vscode.window.showInformationMessage(`${targets.length} öğe kaldırıldı.`)
+      vscWindow.showInformationMessage(Message.Info.itemsRemoved(targets.length))
     }
   }
 
+  /** @description Klasör işleme modunu seçme */
   private async pickFolderHandlingMode(
     placeHolder: string,
   ): Promise<FolderHandlingMode | undefined> {
-    type ModeItem = vscode.QuickPickItem & { value: FolderHandlingMode }
+    type ModeItem = QuickPickItem & { value: FolderHandlingMode }
     const items: ModeItem[] = [
       {
-        label: 'Add folders as items',
-        description: 'Keep folders as single entries',
+        label: Message.Label.addFoldersAsItems(),
+        description: Message.Description.keepFoldersSingleEntry(),
         value: 'folders',
       },
-      { label: 'Add first-level files only', value: 'first' },
-      { label: 'Add all files recursively', value: 'recursive' },
+      { label: Message.Label.addFirstLevelFiles(), value: 'first' },
+      { label: Message.Label.addAllFilesRecursive(), value: 'recursive' },
     ]
-    const quickPick = vscode.window.createQuickPick<ModeItem>()
+    const quickPick = vscWindow.createQuickPick<ModeItem>()
     quickPick.items = items
     quickPick.placeholder = placeHolder
     quickPick.ignoreFocusOut = true
@@ -794,19 +917,19 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     })
   }
 
-  updateTitle = (ws?: readonly vscode.WorkspaceFolder[]) => {
+  updateTitle = (ws?: readonly WorkspaceFolder[]) => {
     const projectName = ws?.[0]?.name
-    if (!this._view) return
-    this._view.title = makeViewTitle(projectName)
+    if (!this._view || !projectName) return EXTENSION_NAME
+    this._view.title = EXTENSION_NAME + ' (' + projectName + ')'
   }
 
   async addFiles(target?: TreeGroupItem) {
     const group = target ?? (await this.pickGroup())
     if (!group) return
-    const uris = await vscode.window.showOpenDialog({
+    const uris = await vscWindow.showOpenDialog({
       canSelectMany: true,
       canSelectFolders: true,
-      openLabel: 'Add to group',
+      openLabel: Message.Dialog.addToGroup(),
     })
     if (!uris) return
     const s = this.state
@@ -816,8 +939,8 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     let hasFolder = false
     for (const u of uris) {
       try {
-        const st = await vscode.workspace.fs.stat(u)
-        if (st.type === vscode.FileType.Directory) {
+        const st = await vscWorkspace.fs.stat(u)
+        if (st.type === FileType.Directory) {
           hasFolder = true
           break
         }
@@ -826,18 +949,18 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     }
     let mode: FolderHandlingMode = 'folders'
     if (hasFolder) {
-      const picked = await this.pickFolderHandlingMode('Select how to add selected folders')
+      const picked = await this.pickFolderHandlingMode(Message.Placeholder.folderHandling())
       if (!picked) return
       mode = picked
     }
     if (mode === 'folders') {
       for (const u of uris) {
         try {
-          const st = await vscode.workspace.fs.stat(u)
+          const st = await vscWorkspace.fs.stat(u)
           const rel = toRelativeFromFsPath(u.fsPath, base)
-          if (st.type === vscode.FileType.Directory) {
+          if (st.type === FileType.Directory) {
             if (!this.hasFileRel(g, rel, base)) g.files.push({ rel, kind: 'folder' })
-          } else if (st.type === vscode.FileType.File) {
+          } else if (st.type === FileType.File) {
             if (!this.hasFileRel(g, rel, base)) g.files.push({ rel, kind: 'file' })
           }
           // eslint-disable-next-line no-empty
@@ -858,15 +981,12 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
   }
 
   /** Explorer seçiminden (dosya/klasör) gruba ekleme */
-  async addExplorerResourcesToGroup(
-    resource?: vscode.Uri,
-    resources?: vscode.Uri[],
-  ): Promise<void> {
+  async addExplorerResourcesToGroup(resource?: Uri, resources?: Uri[]): Promise<void> {
     const selected = (
       resources && resources.length ? resources : resource ? [resource] : []
-    ).filter((u) => !!u && u.scheme === 'file') as vscode.Uri[]
+    ).filter((u) => !!u && u.scheme === 'file') as Uri[]
     if (selected.length === 0) {
-      vscode.window.showInformationMessage("Explorer'dan bir veya daha fazla öğe seçin.")
+      vscWindow.showInformationMessage(Message.Info.explorerSelectionMissing())
       return
     }
 
@@ -874,20 +994,20 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     let group: Group | undefined
     // Grup seçimi veya yeni grup oluşturma
     const items = [
-      { label: '$(new-folder) Yeni Grup...', id: '__new__' },
+      { label: Message.Label.quickPickNewGroup(), id: '__new__' },
       ...this.flattenGroups(s.groups).map((g) => ({
         label: g.pathLabel,
         id: g.id,
       })),
     ]
-    const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: 'Seçilenleri eklenecek grubu seçin',
+    const picked = await vscWindow.showQuickPick(items, {
+      placeHolder: Message.Placeholder.selectGroupForItems(),
     })
     if (!picked) return
     if (picked.id === '__new__') {
       const suggested = this.suggestGroupName(s.groups)
-      const name = await vscode.window.showInputBox({
-        prompt: 'Yeni grup adı',
+      const name = await vscWindow.showInputBox({
+        prompt: Message.Prompt.newGroupName(),
         value: suggested,
       })
       if (name === undefined) return
@@ -911,8 +1031,8 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     let hasFolder = false
     for (const u of selected) {
       try {
-        const st = await vscode.workspace.fs.stat(u)
-        if (st.type === vscode.FileType.Directory) {
+        const st = await vscWorkspace.fs.stat(u)
+        if (st.type === FileType.Directory) {
           hasFolder = true
           break
         }
@@ -921,9 +1041,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     }
     let mode: FolderHandlingMode = 'folders'
     if (hasFolder) {
-      const picked = await this.pickFolderHandlingMode(
-        'Seçilen klasör(ler)i nasıl eklemek istersiniz?',
-      )
+      const picked = await this.pickFolderHandlingMode(Message.Placeholder.folderHandling())
       if (!picked) return
       mode = picked
     } else {
@@ -934,14 +1052,14 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     if (mode === 'folders') {
       for (const u of selected) {
         try {
-          const st = await vscode.workspace.fs.stat(u)
+          const st = await vscWorkspace.fs.stat(u)
           const rel = toRelativeFromFsPath(u.fsPath, base)
-          if (st.type === vscode.FileType.Directory) {
+          if (st.type === FileType.Directory) {
             if (!this.hasFileRel(group, rel, base)) {
               group.files.push({ rel, kind: 'folder' })
               added++
             }
-          } else if (st.type === vscode.FileType.File) {
+          } else if (st.type === FileType.File) {
             if (!this.hasFileRel(group, rel, base)) {
               group.files.push({ rel, kind: 'file' })
               added++
@@ -967,9 +1085,9 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     if (added > 0) {
       this.state = s
       this._emitter.fire()
-      vscode.window.showInformationMessage(`${group.name} grubuna ${added} öğe eklendi.`)
+      vscWindow.showInformationMessage(Message.Info.itemsAddedToGroup(group.name, added))
     } else {
-      vscode.window.showInformationMessage('Seçilen tüm öğeler zaten grupta mevcut.')
+      vscWindow.showInformationMessage(Message.Info.itemsAlreadyInGroup())
     }
   }
 
@@ -1003,18 +1121,20 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     if (!moved) return
     this.state = s
     this._emitter.fire()
-    vscode.window.showInformationMessage(`${moved} öğe ${target.group.name} grubuna taşındı.`)
+    vscWindow.showInformationMessage(Message.Info.itemsMovedToGroup(moved, target.group.name))
   }
 
   async sortGroup(item: TreeGroupItem): Promise<void> {
-    const picked = await vscode.window.showQuickPick(
-      ['Sort Alphabetically', 'Sort by Folder', 'Sort by File Type'],
-      { placeHolder: 'Sort Group' },
+    const picked = await vscWindow.showQuickPick(
+      [
+        { label: Message.Label.sortAlphabetical(), value: 'alphabetical' as const },
+        { label: Message.Label.sortByFolder(), value: 'folder' as const },
+        { label: Message.Label.sortByFileType(), value: 'fileType' as const },
+      ],
+      { placeHolder: Message.Placeholder.sortGroup() },
     )
     if (!picked) return
-    let mode: 'folder' | 'fileType' | 'alphabetical' = 'folder'
-    if (picked === 'Sort by File Type') mode = 'fileType'
-    if (picked === 'Sort Alphabetically') mode = 'alphabetical'
+    const mode: 'folder' | 'fileType' | 'alphabetical' = picked.value
 
     const s = this.state
     const g = this.findGroupById(s.groups, item.group.id)?.group
@@ -1032,10 +1152,10 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
   }
 
   async setGroupFilter(): Promise<void> {
-    const filter = await vscode.window.showInputBox({
+    const filter = await vscWindow.showInputBox({
       value: this._groupFilter,
-      placeHolder: 'Filter groups by name',
-      prompt: 'Enter text to filter groups. Leave empty to clear.',
+      placeHolder: Message.Placeholder.filterGroups(),
+      prompt: Message.Prompt.filterGroups(),
     })
     if (filter === undefined) return
     const trimmed = filter.trim()
@@ -1074,12 +1194,8 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       (this._groupFilter && this._groupFilter.trim()) ||
       (this._tagFilter && this._tagFilter.trim())
     )
-    await vscode.commands.executeCommand('setContext', makeCommandId('hasFilter'), hasFilter)
-    await vscode.commands.executeCommand(
-      'setContext',
-      makeCommandId('activeTag'),
-      this._tagFilter ?? null,
-    )
+    await vscCmds.executeCommand('setContext', makeCommandId('hasFilter'), hasFilter)
+    await vscCmds.executeCommand('setContext', makeCommandId('activeTag'), this._tagFilter ?? null)
   }
 
   async changeGroupIcon(item?: TreeGroupItem): Promise<void> {
@@ -1087,13 +1203,16 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     if (targets.length === 0) return
 
     const items = [
-      { label: 'Default (star)', id: '__default__' },
-      { label: 'No Icon', id: '__none__' },
-      ...icons.map((id) => ({ label: `$(${id}) ${id}`, id })),
+      { label: Message.Label.defaultIcon(), id: '__default__' },
+      { label: Message.Label.noIcon(), id: '__none__' },
+      ...symbols.map((id) => ({ label: `$(${id}) ${id}`, id })),
     ]
 
-    const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: targets.length > 1 ? 'Grup simgesi (tüm seçilenler)' : 'Grup Simgesi...',
+    const picked = await vscWindow.showQuickPick(items, {
+      placeHolder:
+        targets.length > 1
+          ? Message.Placeholder.bulkGroupIcon()
+          : Message.Placeholder.singleGroupIcon(),
     })
     if (!picked) return
     const s = this.state
@@ -1115,28 +1234,30 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     this.state = s
     this._emitter.fire()
     if (targets.length > 1) {
-      vscode.window.showInformationMessage(`${targets.length} grup simgesi güncellendi.`)
+      vscWindow.showInformationMessage(Message.Info.groupIconsUpdated(targets.length))
     }
   }
 
   async changeGroupColor(item?: TreeGroupItem): Promise<void> {
     const targets = this.getGroupTargets(item)
     if (targets.length === 0) return
-    const extra = vscode.workspace
+    const extra = vscWorkspace
       .getConfiguration(EXTENSION_ID)
       .get<string[]>('extraColors', [])
       .filter((s) => typeof s === 'string' && s.trim().length > 0)
       .map((s) => s.trim())
 
     const items = [
-      { label: 'Default', value: '__default__' },
+      { label: Message.Label.defaultColor(), value: '__default__' },
       ...extra.map((v) => ({ label: v, value: v })),
-      ...colors,
-      { label: 'Custom Hex…', value: '__custom_hex__' },
+      ...defaultPalette,
+      { label: Message.Label.customHex(), value: '__custom_hex__' },
     ]
-    const picked = await vscode.window.showQuickPick(items, {
+    const picked = await vscWindow.showQuickPick(items, {
       placeHolder:
-        targets.length > 1 ? 'Seçili gruplar için renk' : 'Select a color for this group',
+        targets.length > 1
+          ? Message.Placeholder.selectColorMultiple()
+          : Message.Placeholder.selectColorSingle(),
     })
     if (!picked) return
     let resolved: string | null
@@ -1144,13 +1265,13 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     if (picked.value === '__default__') {
       resolved = null
     } else if (picked.value === '__custom_hex__') {
-      const hexInput = await vscode.window.showInputBox({
-        prompt: 'Hex color (e.g. #FF8800)',
-        placeHolder: '#RRGGBB',
+      const hexInput = await vscWindow.showInputBox({
+        prompt: Message.Prompt.hexColor(),
+        placeHolder: Message.Placeholder.hexInput(),
         validateInput: (v) =>
           /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(v.trim())
             ? undefined
-            : 'Geçerli bir hex renk girin',
+            : Message.Validation.hexInvalid(),
       })
       if (!hexInput) return
       const hex = this.normalizeHex(hexInput)
@@ -1184,7 +1305,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     this.state = s
     this._emitter.fire()
     if (targets.length > 1) {
-      vscode.window.showInformationMessage(`${targets.length} grubun rengi güncellendi.`)
+      vscWindow.showInformationMessage(Message.Info.groupColorsUpdated(targets.length))
     }
   }
 
@@ -1203,7 +1324,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
   /** Map hex to a custom theming color token via workbench.colorCustomizations */
   private async ensureThemeTokenForHex(hex: string): Promise<string | undefined> {
     const tokenPool = Array.from({ length: 10 }, (_, i) => `${EXTENSION_ID}.color.custom${i + 1}`)
-    const config = vscode.workspace.getConfiguration()
+    const config = vscWorkspace.getConfiguration()
     const current = config.get<any>('workbench.colorCustomizations') || {}
     for (const t of tokenPool) {
       if (
@@ -1216,14 +1337,10 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     const free = tokenPool.find((t) => !current[t]) ?? tokenPool[tokenPool.length - 1]
     const next = { ...current, [free]: hex }
     try {
-      await config.update(
-        'workbench.colorCustomizations',
-        next,
-        vscode.ConfigurationTarget.Workspace,
-      )
+      await config.update('workbench.colorCustomizations', next, ConfigurationTarget.Workspace)
       return free
     } catch {
-      vscode.window.showErrorMessage('Hex rengi uygularken ayar güncellenemedi.')
+      vscWindow.showErrorMessage(Message.Error.applyHexFailed())
       return undefined
     }
   }
@@ -1256,30 +1373,30 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
   }
 
   async exportGroupsToFile(): Promise<void> {
-    const defaultPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
-    const uri = await vscode.window.showSaveDialog({
+    const defaultPath = vscWorkspace.workspaceFolders?.[0]?.uri.fsPath
+    const uri = await vscWindow.showSaveDialog({
       defaultUri: defaultPath
-        ? vscode.Uri.file(path.join(defaultPath, `${EXTENSION_ID}-export.json`))
+        ? Uri.file(path.join(defaultPath, `${EXTENSION_ID}-export.json`))
         : undefined,
       filters: { json: ['json'] },
-      saveLabel: 'Export Groups',
+      saveLabel: Message.Dialog.exportSaveLabel(),
     })
     if (!uri) return
     const content = JSON.stringify(this.state, null, 2)
-    await vscode.workspace.fs.writeFile(uri, Provider.encoder.encode(content))
-    vscode.window.showInformationMessage('Groups exported successfully.')
+    await vscWorkspace.fs.writeFile(uri, DataProvider.encoder.encode(content))
+    vscWindow.showInformationMessage(Message.Info.groupsExported())
   }
 
   async importGroupsFromFile(): Promise<void> {
-    const picked = await vscode.window.showOpenDialog({
+    const picked = await vscWindow.showOpenDialog({
       canSelectMany: false,
       filters: { json: ['json'] },
-      openLabel: 'Import Groups',
+      openLabel: Message.Dialog.importOpenLabel(),
     })
     const uri = picked?.[0]
     if (!uri) return
     try {
-      const buf = await vscode.workspace.fs.readFile(uri)
+      const buf = await vscWorkspace.fs.readFile(uri)
       const text = new TextDecoder('utf-8').decode(buf)
       const data = JSON.parse(text) as Partial<State>
       const imported = ensureStateWithMeta(data)
@@ -1296,20 +1413,20 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       for (const g of imported.groups) s.groups.push(reId(g))
       this.state = s
       this._emitter.fire()
-      vscode.window.showInformationMessage('Groups imported successfully.')
+      vscWindow.showInformationMessage(Message.Info.groupsImported())
     } catch {
-      vscode.window.showErrorMessage('Invalid JSON file. Import failed.')
+      vscWindow.showErrorMessage(Message.Error.importInvalid())
     }
   }
 
   private async pickGroup(): Promise<TreeGroupItem | undefined> {
     const groups = this.state.groups
     if (groups.length === 0) {
-      vscode.window.showInformationMessage('Önce bir grup ekleyin.')
+      vscWindow.showInformationMessage(Message.Info.addGroupFirst())
       return
     }
     const flat = this.flattenGroups(groups)
-    const picked = await vscode.window.showQuickPick(
+    const picked = await vscWindow.showQuickPick(
       flat.map((g) => ({ label: g.pathLabel, id: g.id })),
     )
     if (!picked) return
@@ -1323,14 +1440,14 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     if (!g) return
     const fe = g.files.find((x) => x.rel === item.entry.rel)
     if (!fe) return
-    const name = await vscode.window.showInputBox({
-      prompt: 'Alias (optional)',
+    const name = await vscWindow.showInputBox({
+      prompt: Message.Prompt.aliasOptional(),
       value: fe.name ?? '',
       placeHolder: item.entry.rel,
     })
     if (name === undefined) return
-    const description = await vscode.window.showInputBox({
-      prompt: 'Description (optional)',
+    const description = await vscWindow.showInputBox({
+      prompt: Message.Prompt.descriptionOptional(),
       value: fe.description ?? '',
     })
     if (description === undefined) return
@@ -1348,9 +1465,9 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     if (!g) return
     const fe = g.files.find((x) => x.rel === item.entry.rel)
     if (!fe) return
-    const value = await vscode.window.showInputBox({
-      prompt: 'File tags (comma separated)',
-      placeHolder: 'ör. helper, api',
+    const value = await vscWindow.showInputBox({
+      prompt: Message.Prompt.fileTags(),
+      placeHolder: Message.Placeholder.fileTags(),
       value: (fe.tags ?? []).join(', '),
     })
     if (value === undefined) return
@@ -1366,10 +1483,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
   }
 
   // --- Drag & Drop ---
-  handleDrag(
-    source: readonly TreeItem[],
-    dataTransfer: vscode.DataTransfer,
-  ): void | Thenable<void> {
+  handleDrag(source: readonly TreeItem[], dataTransfer: DataTransfer): void | Thenable<void> {
     const filePayload = source
       .filter((i): i is TreeFileItem => i instanceof TreeFileItem)
       .map((i) => ({
@@ -1385,12 +1499,12 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     if (payload.length > 0) {
       dataTransfer.set(
         `application/vnd.code.tree.${VIEW_ID}`,
-        new vscode.DataTransferItem(JSON.stringify(payload)),
+        new DataTransferItem(JSON.stringify(payload)),
       )
     }
   }
 
-  async handleDrop(target: TreeItem | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
+  async handleDrop(target: TreeItem | undefined, dataTransfer: DataTransfer): Promise<void> {
     if (target && !(target instanceof TreeGroupItem) && !(target instanceof TreeFileItem)) {
       return
     }
@@ -1447,10 +1561,10 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       const s = this.state
       const g = this.findGroupById(s.groups, target.group.id)!.group
       const base = s.meta.basePath
-      const uris: vscode.Uri[] = []
+      const uris: Uri[] = []
       for (const raw of list) {
         try {
-          uris.push(vscode.Uri.parse(raw))
+          uris.push(Uri.parse(raw))
         } catch {
           /* yut */
         }
@@ -1459,8 +1573,8 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       let hasFolder = false
       for (const u of uris) {
         try {
-          const st = await vscode.workspace.fs.stat(u)
-          if (st.type === vscode.FileType.Directory) {
+          const st = await vscWorkspace.fs.stat(u)
+          if (st.type === FileType.Directory) {
             hasFolder = true
             break
           }
@@ -1469,18 +1583,18 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
       }
       let mode: FolderHandlingMode = 'folders'
       if (hasFolder) {
-        const picked = await this.pickFolderHandlingMode('Select how to add dropped folder(s)')
+        const picked = await this.pickFolderHandlingMode(Message.Placeholder.folderHandling())
         if (!picked) return
         mode = picked
       }
       if (mode === 'folders') {
         for (const u of uris) {
           try {
-            const st = await vscode.workspace.fs.stat(u)
+            const st = await vscWorkspace.fs.stat(u)
             const rel = toRelativeFromFsPath(u.fsPath, base)
-            if (st.type === vscode.FileType.Directory) {
+            if (st.type === FileType.Directory) {
               if (!this.hasFileRel(g, rel, base)) g.files.push({ rel, kind: 'folder' })
-            } else if (st.type === vscode.FileType.File) {
+            } else if (st.type === FileType.File) {
               if (!this.hasFileRel(g, rel, base)) g.files.push({ rel, kind: 'file' })
             }
             // eslint-disable-next-line no-empty
@@ -1577,7 +1691,7 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
 
   /** Aynı seviyedeki kardeş gruplara göre benzersiz bir ad önerir. */
   private suggestGroupName(siblings: Group[]): string {
-    const base = 'Group'
+    const base = Message.Defaults.groupBaseName()
     const names = new Set((siblings || []).map((g) => (g.name || '').trim()))
     if (!names.has(base)) return base
     for (let i = 1; i < 1000; i++) {
@@ -1588,5 +1702,3 @@ class Provider implements TreeDataProvider<TreeItem>, TreeDragAndDropController<
     return `${base}.${Date.now()}`
   }
 }
-
-export default Provider

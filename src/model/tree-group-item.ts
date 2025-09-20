@@ -1,7 +1,8 @@
 import * as vscode from 'vscode'
 import TreeItem from '@model/tree-item'
 import Group from '@type/group'
-import TreeItemKind from './tree-item-kind'
+import TreeItemKind from '../enumeration/tree-item-kind'
+import * as Message from '@lib/message'
 export class TreeGroupItem extends TreeItem {
   kind: TreeItemKind.Group = TreeItemKind.Group
   constructor(
@@ -29,11 +30,13 @@ export class TreeGroupItem extends TreeItem {
       this.description = descriptionParts.join(' • ')
       const tooltip = new vscode.MarkdownString(undefined, true)
       if (group.description && group.description.trim()) {
-        tooltip.appendMarkdown(`**Açıklama:** ${group.description.trim()}`)
+        const label = Message.Group.tooltipDescriptionLabel()
+        tooltip.appendMarkdown(`${label} ${group.description.trim()}`)
         if (tags.length) tooltip.appendMarkdown('\n\n')
       }
       if (tags.length) {
-        tooltip.appendMarkdown(`**Etiketler:** ${tags.map((t) => `\`#${t}\``).join(' ')}`)
+        const label = Message.Group.tooltipTagsLabel()
+        tooltip.appendMarkdown(`${label} ${tags.map((t) => `\`#${t}\``).join(' ')}`)
       }
       this.tooltip = tooltip
     }

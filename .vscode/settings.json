@@ -10,5 +10,6 @@
     "workscene.color.custom6": "#9CA3AF",
     "workscene.color.custom7": "#7C86FF",
     "workscene.color.custom8": "#FF6467"
-  }
+  },
+  "jest.enable": false
 }

@@ -1,33 +1,65 @@
-import * as vscode from 'vscode'
 import { TextDecoder } from 'util'
-import Provider from './model/extension-provider'
-import { CONFIG_FILE_BASENAME, VIEW_ID } from '@lib/constants'
-import State from '@type/state'
-import TreeItem from '@model/tree-item'
-import { TreeGroupItem } from '@model/tree-group-item'
-import { TreeFileItem } from '@model/tree-file-item'
-import { ensureStateWithMeta } from './util/normalize'
-import { makeCommandId, EXTENSION_ID } from '@lib/constants'
-import TreeItemKind from './model/tree-item-kind'
 import type { ExtensionContext } from 'vscode'
+import {
+  RelativePattern,
+  Uri,
+  commands as vscCmds,
+  window as vscWindow,
+  workspace as vscWs,
+} from 'vscode'
 
+import State from '@type/state'
+import * as l10n from '@vscode/l10n'
+import TreeItem from '@model/tree-item'
+import * as Message from '@lib/message'
+import { TreeFileItem } from '@model/tree-file-item'
+import { TreeGroupItem } from '@model/tree-group-item'
+import { EXTENSION_ID } from '@lib/constants'
+import { CONFIG_FILE_BASENAME, VIEW_ID } from '@lib/constants'
+import { makeCommandId } from '@util/command-id'
+
+import DataProvider from '@/data-provider'
+import TreeItemKind from '@/enumeration/tree-item-kind'
+import { ensureStateWithMeta } from '@util/normalize'
 /**
- *
- * @description Eklentinin giriş noktası. Modüler yapıya ayrılmış sınıf ve yardımcıları
+ * @summary Eklentinin giriş noktası. Modüler yapıya ayrılmış sınıf ve yardımcıları
  * buradan içe aktarılır, TreeView oluşturulur ve komutlar kaydedilir.
  */
-export function activate(context: ExtensionContext) {
-  const provider = new Provider(context)
+export async function activate(context: ExtensionContext) {
+  /**
+   * @summary Locale dosyasını yükler. Eğer yüklenemediğinde default strings kullanılır.
+   */
+  try {
+    await l10n.config({
+      contents: context.asAbsolutePath('l10n/bundle.l10n.json'),
+    })
+  } catch {
+    // Bundle missing in dev mode; fall back to default strings.
+  }
 
-  const treeView = vscode.window.createTreeView(VIEW_ID, {
-    treeDataProvider: provider,
-    dragAndDropController: provider,
+  /**
+   * @summary Provider sınıf örneğini oluşturur.
+   */
+  const dataProvider = new DataProvider(context)
+
+  /**
+   * @summary TreeView'i oluşturur ve dataProvider'ı bağlar.
+   */
+  const treeView = vscWindow.createTreeView(VIEW_ID, {
+    treeDataProvider: dataProvider,
+    dragAndDropController: dataProvider,
     showCollapseAll: true,
     canSelectMany: true,
   })
-  provider.attachView?.(treeView)
 
-  // Focus key context for item kind (group/file) to support Enter=Rename behavior
+  /**
+   * @description TreeView'i dataProvider'a bağlar.
+   */
+  dataProvider.attachView?.(treeView)
+
+  /**
+   * @description Focus key context for item kind (group/file) to support Enter=Rename behavior
+   */
   context.subscriptions.push(
     treeView.onDidChangeSelection(async (e) => {
       const sel = e.selection?.[0]
@@ -37,119 +69,252 @@ export function activate(context: ExtensionContext) {
           : sel instanceof TreeFileItem
             ? TreeItemKind.File.toString()
             : undefined
-      await vscode.commands.executeCommand('setContext', makeCommandId('focusedKind'), kind)
+      await vscCmds.executeCommand('setContext', makeCommandId('focusedKind'), kind)
     }),
   )
+
+  /**
+   * @description Dosya oluşturulduğunda, dosya silindiğinde, dosya yeniden adlandırıldığında veya dosya kaydedildiğinde treeview'ı, dataProvider'ın refresh metodunu çağırarak güncelle.
+   */
   context.subscriptions.push(
-    vscode.workspace.onDidCreateFiles(() => provider.refresh()),
-    vscode.workspace.onDidDeleteFiles(() => provider.refresh()),
-    vscode.workspace.onDidRenameFiles(() => provider.refresh()),
-    vscode.workspace.onDidSaveTextDocument(() => provider.refresh()),
+    vscWs.onDidCreateFiles(() => dataProvider.refresh()),
+    vscWs.onDidDeleteFiles(() => dataProvider.refresh()),
+    vscWs.onDidRenameFiles(() => dataProvider.refresh()),
+    vscWs.onDidSaveTextDocument(() => dataProvider.refresh()),
   )
 
-  // Görünüm başlığını mevcut workspace adıyla güncelle
+  /**
+   * @description Aktivasyon işlemi sırasında workspace folders değiştiğinde başlığı güncelle
+   */
+  dataProvider.updateTitle(vscWs.workspaceFolders)
 
-  provider.updateTitle(vscode.workspace.workspaceFolders)
+  /**
+   * @description Workspace'e workspace folders değiştiğinde başlığı günceller.
+   */
   context.subscriptions.push(
-    vscode.workspace.onDidChangeWorkspaceFolders((e) => provider.updateTitle(e.added)),
+    vscWs.onDidChangeWorkspaceFolders((e) => dataProvider.updateTitle(e.added)),
   )
 
+  /**
+   * @description Komutları kaydeder.
+   * */
   context.subscriptions.push(
-    vscode.commands.registerCommand(makeCommandId('addGroup'), () => {
+    /**
+     * @summary `addGroup` komutunu kaydeder.
+     * @param g - Hedef grup; verilmezse seçimden alınır.
+     * @description `addGroup` komutu, seçilen grupa veya seçilen grup yoksa yeni grup oluşturur.
+     */
+    vscCmds.registerCommand(makeCommandId('addGroup'), () => {
       const sel = treeView.selection?.[0]
-      if (sel instanceof TreeGroupItem) return provider.addGroup(sel)
-      return provider.addGroup()
+      if (sel instanceof TreeGroupItem) return dataProvider.addGroup(sel)
+      return dataProvider.addGroup()
     }),
-    vscode.commands.registerCommand(makeCommandId('addSubGroup'), (g: TreeGroupItem) =>
-      provider.addSubGroup(g),
+
+    /**
+     * @summary `addSubGroup` komutunu kaydeder.
+     * @param g - Hedef grup.
+     * @description `addSubGroup` komutu, seçilen grupa alt grup oluşturur.
+     */
+    vscCmds.registerCommand(makeCommandId('addSubGroup'), (g: TreeGroupItem) =>
+      dataProvider.addSubGroup(g),
     ),
-    vscode.commands.registerCommand(makeCommandId('openAllInGroup'), (g: TreeGroupItem) =>
-      provider.openAllInGroup(g),
+    /**
+     * @summary `openAllInGroup` komutunu kaydeder.
+     * @param g - Hedef grup.
+     * @description `openAllInGroup` komutu, seçilen gruptaki tüm dosyaları açar.
+     */
+    vscCmds.registerCommand(makeCommandId('openAllInGroup'), (g: TreeGroupItem) =>
+      dataProvider.openAllInGroup(g),
     ),
-    vscode.commands.registerCommand(makeCommandId('addOpenTabsToGroup'), (g?: TreeGroupItem) =>
-      provider.addOpenTabsToGroup(g),
+
+    /**
+     * @summary `addOpenTabsToGroup` komutunu kaydeder.
+     * @param g - Hedef grup; verilmezse seçimden alınır.
+     * @description `addOpenTabsToGroup` komutu, seçilen grupa veya seçilen grup yoksa yeni grup oluşturur.
+     */
+    vscCmds.registerCommand(makeCommandId('addOpenTabsToGroup'), (g?: TreeGroupItem) =>
+      dataProvider.addOpenTabsToGroup(g),
     ),
-    vscode.commands.registerCommand(makeCommandId('renameGroup'), (g?: TreeGroupItem) => {
+
+    /**
+     * @summary `renameGroup` komutunu kaydeder.
+     * @param g - Hedef grup; verilmezse seçimden alınır.
+     * @description `renameGroup` komutu, seçilen grupın adını değiştirir.
+     */
+    vscCmds.registerCommand(makeCommandId('renameGroup'), (g?: TreeGroupItem) => {
       const target =
         g ??
         (treeView.selection?.[0] instanceof TreeGroupItem
           ? (treeView.selection?.[0] as TreeGroupItem)
           : undefined)
-      if (target) return provider.renameGroup(target)
+      if (target) return dataProvider.renameGroup(target)
     }),
-    vscode.commands.registerCommand(makeCommandId('editGroupMeta'), (g?: TreeGroupItem) => {
+
+    /**
+     * @summary `editGroupMeta` komutunu kaydeder.
+     * @param g - Hedef grup; verilmezse seçimden alınır.
+     * @description `editGroupMeta` komutu, seçilen grupın meta verilerini düzenler.
+     */
+    vscCmds.registerCommand(makeCommandId('editGroupMeta'), (g?: TreeGroupItem) => {
       const selection = treeView.selection ?? []
       const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
       const target = g ?? fallback
-      if (target) return provider.editGroupMeta(target)
+      if (target) return dataProvider.editGroupMeta(target)
     }),
-    vscode.commands.registerCommand(makeCommandId('addFiles'), (g?: TreeGroupItem) =>
-      provider.addFiles(g),
+
+    /**
+     * @summary `addFiles` komutunu kaydeder.
+     * @param g - Hedef grup; verilmezse seçimden alınır.
+     * @description `addFiles` komutu, seçilen grupa dosya ekleme.
+     */
+    vscCmds.registerCommand(makeCommandId('addFiles'), (g?: TreeGroupItem) =>
+      dataProvider.addFiles(g),
     ),
-    vscode.commands.registerCommand(makeCommandId('remove'), (it?: TreeItem) => {
+
+    /**
+     * @summary `remove` komutunu kaydeder.
+     * @param it - Hedef öğe; verilmezse seçimden alınır.
+     * @description `remove` komutu, seçilen öğeyi kaldırır.
+     */
+    vscCmds.registerCommand(makeCommandId('remove'), (it?: TreeItem) => {
       const selection = treeView.selection ?? []
       const fallback = selection.length ? (selection[0] as TreeItem) : undefined
-      return provider.remove(it ?? fallback)
+      return dataProvider.remove(it ?? fallback)
     }),
-    vscode.commands.registerCommand(makeCommandId('moveToGroup'), (it?: TreeFileItem) => {
+
+    /**
+     * @summary `moveToGroup` komutunu kaydeder.
+     * @param it - Hedef öğe; verilmezse seçimden alınır.
+     * @description `moveToGroup` komutu, seçilen öğeyi başka bir gruba taşır.
+     */
+    vscCmds.registerCommand(makeCommandId('moveToGroup'), (it?: TreeFileItem) => {
       const selection = treeView.selection ?? []
       const fallback = selection.find((sel): sel is TreeFileItem => sel instanceof TreeFileItem)
-      return provider.moveToGroup(it ?? fallback)
+      return dataProvider.moveToGroup(it ?? fallback)
     }),
-    vscode.commands.registerCommand(makeCommandId('editFileMeta'), (it: TreeFileItem) =>
-      provider.editFileAliasDescription(it),
+
+    /**
+     * @summary `editFileMeta` komutunu kaydeder.
+     * @param it - Hedef öğe.
+     * @description `editFileMeta` komutu, seçilen dosyanın meta verilerini düzenler.
+     */
+    vscCmds.registerCommand(makeCommandId('editFileMeta'), (it: TreeFileItem) =>
+      dataProvider.editFileAliasDescription(it),
     ),
-    vscode.commands.registerCommand(makeCommandId('editFileTags'), (it: TreeFileItem) =>
-      provider.editFileTags(it),
+
+    /**
+     * @summary `editFileTags` komutunu kaydeder.
+     * @param it - Hedef öğe.
+     * @description `editFileTags` komutu, seçilen dosyanın etiketlerini düzenler.
+     */
+    vscCmds.registerCommand(makeCommandId('editFileTags'), (it: TreeFileItem) =>
+      dataProvider.editFileTags(it),
     ),
-    vscode.commands.registerCommand(makeCommandId('sortGroup'), (g: TreeGroupItem) =>
-      provider.sortGroup(g),
+    /**
+     * @summary `sortGroup` komutunu kaydeder.
+     * @param g - Hedef grup.
+     * @description `sortGroup` komutu, seçilen gruptaki dosyaları sıralar.
+     */
+    vscCmds.registerCommand(makeCommandId('sortGroup'), (g: TreeGroupItem) =>
+      dataProvider.sortGroup(g),
     ),
-    vscode.commands.registerCommand(makeCommandId('filterGroups'), () => provider.setGroupFilter()),
-    vscode.commands.registerCommand(makeCommandId('clearFilter'), () =>
-      provider.clearGroupFilter(),
-    ),
-    vscode.commands.registerCommand(makeCommandId('changeGroupIcon'), (g?: TreeGroupItem) => {
+    vscCmds.registerCommand(makeCommandId('filterGroups'), () => dataProvider.setGroupFilter()),
+    vscCmds.registerCommand(makeCommandId('clearFilter'), () => dataProvider.clearGroupFilter()),
+
+    /**
+     * Grup simgesini değiştirir.
+     * @param g - Hedef grup; verilmezse seçimden alınır.
+     * @returns İşlem tamamlandığında void.
+     */
+    vscCmds.registerCommand(makeCommandId('changeGroupIcon'), (g?: TreeGroupItem) => {
       const selection = treeView.selection ?? []
       const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
-      return provider.changeGroupIcon(g ?? fallback)
+      return dataProvider.changeGroupIcon(g ?? fallback)
     }),
-    vscode.commands.registerCommand(makeCommandId('changeGroupColor'), (g?: TreeGroupItem) => {
+
+    /**
+     * Grup rengini değiştirir.
+     * @param g - Hedef grup; verilmezse seçimden alınır.
+     * @returns İşlem tamamlandığında void.
+     */
+    vscCmds.registerCommand(makeCommandId('changeGroupColor'), (g?: TreeGroupItem) => {
       const selection = treeView.selection ?? []
       const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
-      return provider.changeGroupColor(g ?? fallback)
+      return dataProvider.changeGroupColor(g ?? fallback)
     }),
-    vscode.commands.registerCommand(makeCommandId('editGroupTags'), (g?: TreeGroupItem) => {
+
+    /**
+     * @summary `editGroupTags` komutunu kaydeder.
+     * @param g - Hedef grup; verilmezse seçimden alınır.
+     * @description `editGroupTags` komutu, seçilen grupın etiketlerini düzenler.
+     */
+    vscCmds.registerCommand(makeCommandId('editGroupTags'), (g?: TreeGroupItem) => {
       const selection = treeView.selection ?? []
       const fallback = selection.find((sel): sel is TreeGroupItem => sel instanceof TreeGroupItem)
       const target = g ?? fallback
-      if (target) return provider.editGroupTags(target)
+      if (target) return dataProvider.editGroupTags(target)
     }),
-    vscode.commands.registerCommand(makeCommandId('export'), () => provider.exportGroupsToFile()),
-    vscode.commands.registerCommand(makeCommandId('import'), () => provider.importGroupsFromFile()),
-    vscode.commands.registerCommand(makeCommandId('undoCloseEditors'), () =>
-      provider.undoCloseEditors(),
+
+    /**
+     * @summary `export` komutunu kaydeder.
+     * @description `export` komutu, grupları dosyaya dışa aktarır.
+     */
+    vscCmds.registerCommand(makeCommandId('export'), () => dataProvider.exportGroupsToFile()),
+
+    /**
+     * @summary `import` komutunu kaydeder.
+     * @description `import` komutu, grupları dosyadan içe aktarır.
+     */
+    vscCmds.registerCommand(makeCommandId('import'), () => dataProvider.importGroupsFromFile()),
+
+    /**
+     * @summary `undoCloseEditors` komutunu kaydeder.
+     * @description `undoCloseEditors` komutu, kapatılan dosyaları geri alır.
+     */
+    vscCmds.registerCommand(makeCommandId('undoCloseEditors'), () =>
+      dataProvider.undoCloseEditors(),
     ),
-    vscode.commands.registerCommand(makeCommandId('saveNow'), async () => {
+
+    /**
+     * @summary `saveNow` komutunu kaydeder.
+     * @description `saveNow` komutu, grupları kaydeder.
+     */
+    vscCmds.registerCommand(makeCommandId('saveNow'), async () => {
       // UI'yi anında güncelle: menüden düşsün
-      await vscode.commands.executeCommand('setContext', makeCommandId('canSave'), false)
+      await vscCmds.executeCommand('setContext', makeCommandId('canSave'), false)
       try {
-        await provider.saveNow()
+        await dataProvider.saveNow()
       } catch {
         // Hata olursa yeniden etkinleştir ve bildir
-        await vscode.commands.executeCommand('setContext', makeCommandId('canSave'), true)
-        vscode.window.showErrorMessage('Kaydetme başarısız oldu.')
+        await vscCmds.executeCommand('setContext', makeCommandId('canSave'), true)
+        vscWindow.showErrorMessage(Message.Error.saveFailed())
       }
     }),
-    vscode.commands.registerCommand(makeCommandId('refresh'), () => provider.refresh()),
-    // Explorer bağlam menüsü: seçilen öğeleri gruba ekle
-    vscode.commands.registerCommand(
+
+    /**
+     * @summary `refresh` komutunu kaydeder.
+     * @description `refresh` komutu, grupları yeniler.
+     */
+    vscCmds.registerCommand(makeCommandId('refresh'), () => dataProvider.refresh()),
+
+    /**
+     * @summary `addToGroupFromExplorer` komutunu kaydeder.
+     * @param resource - Hedef kaynak.
+     * @param selected - Seçilen kaynaklar.
+     * @description `addToGroupFromExplorer` komutu, seçilen öğeleri gruba ekle.
+     */
+    vscCmds.registerCommand(
       makeCommandId('addToGroupFromExplorer'),
-      (resource: vscode.Uri, selected?: vscode.Uri[]) =>
-        provider.addExplorerResourcesToGroup(resource, selected),
+      (resource: Uri, selected?: Uri[]) =>
+        dataProvider.addExplorerResourcesToGroup(resource, selected),
     ),
-    vscode.commands.registerCommand(makeCommandId('expandAll'), async () => {
-      const roots = await provider.getChildren()
+
+    /**
+     * @summary `expandAll` komutunu kaydeder.
+     * @description `expandAll` komutu, tüm grupları genişletir.
+     */
+    vscCmds.registerCommand(makeCommandId('expandAll'), async () => {
+      const roots = await dataProvider.getChildren()
       if (!roots || roots.length === 0) return
       let first = true
       for (const r of roots) {
@@ -157,17 +322,29 @@ export function activate(context: ExtensionContext) {
         first = false
       }
     }),
-    vscode.commands.registerCommand(makeCommandId('applyTagFilter'), (tag: string) =>
-      provider.applyTagFilter(tag),
+
+    /**
+     * @summary `applyTagFilter` komutunu kaydeder.
+     * @param tag - Etiket.
+     * @description `applyTagFilter` komutu, etikete göre filtreler.
+     */
+    vscCmds.registerCommand(makeCommandId('applyTagFilter'), (tag: string) =>
+      dataProvider.applyTagFilter(tag),
     ),
-    vscode.commands.registerCommand(makeCommandId('clearTagFilter'), () =>
-      provider.clearTagFilter(),
-    ),
+
+    /**
+     * @summary `clearTagFilter` komutunu kaydeder.
+     * @description `clearTagFilter` komutu, etiket filtresini temizler.
+     */
+    vscCmds.registerCommand(makeCommandId('clearTagFilter'), () => dataProvider.clearTagFilter()),
   )
 
-  // Inline accessory visibility (only affects inline buttons): add-subgroup, remove
+  /**
+   * @summary `applyActionVisibilityFromConfig` komutunu kaydeder.
+   * @description `applyActionVisibilityFromConfig` komutu, inline butonların görünürlüğünü ayarlar.
+   */
   const applyActionVisibilityFromConfig = async () => {
-    const cfg = vscode.workspace.getConfiguration(EXTENSION_ID)
+    const cfg = vscWs.getConfiguration(EXTENSION_ID)
     const ids = (
       cfg.get<string[]>('itemAccessoryActionIds') ||
       cfg.get<string[]>('itemAccesoryActionsIds') || ['add-subgroup', 'remove']
@@ -177,15 +354,20 @@ export function activate(context: ExtensionContext) {
 
     const allow = new Set(ids)
     const set = (key: string, value: boolean) =>
-      vscode.commands.executeCommand('setContext', makeCommandId(`action.${key}`), value)
+      vscCmds.executeCommand('setContext', makeCommandId('action.' + key), value)
 
     const allKeys = ['add-subgroup', 'remove']
     await Promise.all(allKeys.map((k) => set(k, false)))
     await Promise.all(Array.from(allow).map((k) => set(k, true)))
   }
   void applyActionVisibilityFromConfig()
+
+  /**
+   * @summary `onDidChangeConfiguration` komutunu kaydeder.
+   * @description `onDidChangeConfiguration` komutu, konfigürasyon değiştiğinde inline butonların görünürlüğünü ayarlar.
+   */
   context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration((e) => {
+    vscWs.onDidChangeConfiguration((e) => {
       if (
         e.affectsConfiguration(makeCommandId('itemAccessoryActionIds')) ||
         e.affectsConfiguration(makeCommandId('itemAccesoryActionsIds'))
@@ -195,24 +377,22 @@ export function activate(context: ExtensionContext) {
     }),
   )
 
-  const ws = vscode.workspace.workspaceFolders?.[0]
+  const ws = vscWs.workspaceFolders?.[0]
   if (ws) {
-    const watcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(ws, CONFIG_FILE_BASENAME),
-    )
+    const watcher = vscWs.createFileSystemWatcher(new RelativePattern(ws, CONFIG_FILE_BASENAME))
     let reloadTimer: ReturnType<typeof setTimeout> | undefined
     const reload = async () => {
-      const u = vscode.Uri.joinPath(ws.uri, CONFIG_FILE_BASENAME)
+      const u = Uri.joinPath(ws.uri, CONFIG_FILE_BASENAME)
       try {
-        if ((provider as any)._isWriting) {
+        if ((dataProvider as any)._isWriting) {
           return
         }
-        const content = await vscode.workspace.fs.readFile(u)
+        const content = await vscWs.fs.readFile(u)
         const text = new TextDecoder('utf-8').decode(content)
         const parsed = JSON.parse(text) as Partial<State>
-        ;(provider as any)._state = ensureStateWithMeta(parsed)
-        provider.refresh()
-        ;(provider as any).syncSavedSignatureWithState?.()
+        ;(dataProvider as any)._state = ensureStateWithMeta(parsed)
+        dataProvider.refresh()
+        ;(dataProvider as any).syncSavedSignatureWithState?.()
       } catch {
         // Dosya yoksa ya da bozuksa: yut ve bozma.
       }
@@ -226,14 +406,24 @@ export function activate(context: ExtensionContext) {
       watcher.onDidChange(scheduleReload),
       watcher.onDidCreate(scheduleReload),
       watcher.onDidDelete(async () => {
-        ;(provider as any)._state = ensureStateWithMeta({
+        ;(dataProvider as any)._state = ensureStateWithMeta({
           groups: [],
         } as any)
-        provider.refresh()
+        dataProvider.refresh()
       }),
     )
+    /**
+     * @description Konfigürasyon dosyasını yeniler.
+     */
     void reload()
   }
+  /** Aktivasyon sonu */
 }
 
-export function deactivate() {}
+/**
+ * @summary `deactivate` komutunu kaydeder.
+ * @description `deactivate` komutu, eklentiyi devre dışı bırakır. Bu fonksiyon çağrıldığında eklenti devre dışı bırakılır.
+ */
+export function deactivate() {
+  // Eklenti devre dışı bırakıldığında yapılacak işlemler.
+}
